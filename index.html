@@ -1,0 +1,153 @@
+<script>
+// ...（其他不動）
+
+function pickColumn(headers, candidates) {
+const lower = headers.map(h => String(h).trim().toLowerCase());
+for (const c of candidates) {
+const idx = lower.indexOf(String(c).toLowerCase());
+if (idx >= 0) return headers[idx];
+}
+return null;
+}
+
+function toNumber(x) {
+if (x === null || x === undefined) return NaN;
+if (typeof x === 'number') return x;
+const s = String(x).trim().replace('%','');
+const n = Number(s);
+return Number.isFinite(n) ? n : NaN;
+}
+
+// ✅ 支援雙層：group1 / group2
+function normalizeRows(rawRows) {
+if (!Array.isArray(rawRows) || rawRows.length === 0) throw new Error('沒有讀到任何資料列。');
+const headers = Object.keys(rawRows[0] || {});
+if (headers.length === 0) throw new Error('找不到欄位（header）。');
+
+const colG1 = pickColumn(headers, ['group1','sector','類股','產業','分類1','大類']);
+const colG2 = pickColumn(headers, ['group2','industry','子產業','次類','分類2','細分']);
+const colSymbol = pickColumn(headers, ['symbol','ticker','code','代碼','股票','stock','name']);
+const colValue = pickColumn(headers, ['value','amount','turnover','成交額','成交金額','size','weight','權重']);
+const colChange = pickColumn(headers, ['change','chg','return','pct','漲跌','漲跌幅','報酬','報酬率']);
+
+if (!colSymbol) throw new Error('找不到「symbol」欄位（可接受：symbol/ticker/code/代碼/股票）。');
+if (!colChange) throw new Error('找不到「change」欄位（可接受：change/return/pct/漲跌幅）。');
+
+const rows = rawRows.map(r => {
+const group1 = colG1 ? String(r[colG1] ?? '未分類').trim() : '未分類';
+const group2 = colG2 ? String(r[colG2] ?? '未細分').trim() : '未細分';
+const symbol = String(r[colSymbol] ?? '').trim();
+const value = colValue ? toNumber(r[colValue]) : 1;
+const change = toNumber(r[colChange]);
+
+if (!symbol) return null;
+return {
+group1,
+group2,
+symbol,
+value: Number.isFinite(value) && value > 0 ? value : 1,
+change: Number.isFinite(change) ? change : 0
+};
+}).filter(Boolean);
+
+if (rows.length === 0) throw new Error('資料列解析後為空（可能 symbol 欄位都是空的）。');
+return rows;
+}
+
+// ✅ 雙層 treemap：root → group1 → group2 → symbol
+function buildTreemap2Level(rows) {
+// sums + weighted change for group1 & group2
+const g1Map = new Map(); // group1 -> {value, wchg}
+const g2Map = new Map(); // key=group1||group2 -> {value, wchg}
+
+for (const r of rows) {
+// group1
+if (!g1Map.has(r.group1)) g1Map.set(r.group1, {value:0, wchg:0});
+const a = g1Map.get(r.group1);
+a.value += r.value;
+a.wchg += r.change * r.value;
+
+// group2
+const k = `${r.group1}||${r.group2}`;
+if (!g2Map.has(k)) g2Map.set(k, {value:0, wchg:0});
+const b = g2Map.get(k);
+b.value += r.value;
+b.wchg += r.change * r.value;
+}
+
+const ids = [];
+const labels = [];
+const parents = [];
+const values = [];
+const colors = [];
+
+// root
+ids.push('root');
+labels.push('全部');
+parents.push('');
+const totalValue = Array.from(g1Map.values()).reduce((s,x)=>s+x.value,0);
+values.push(totalValue);
+colors.push(0);
+
+// level 1: group1
+for (const [g1, v] of g1Map.entries()) {
+ids.push(`g1:${g1}`);
+labels.push(g1);
+parents.push('root');
+values.push(v.value);
+colors.push(v.value ? (v.wchg / v.value) : 0);
+}
+
+// level 2: group2
+for (const [k, v] of g2Map.entries()) {
+const [g1, g2] = k.split('||');
+ids.push(`g2:${g1}||${g2}`);
+labels.push(g2);
+parents.push(`g1:${g1}`);
+values.push(v.value);
+colors.push(v.value ? (v.wchg / v.value) : 0);
+}
+
+// leaves: symbols
+for (const r of rows) {
+ids.push(`sym:${r.group1}||${r.group2}||${r.symbol}`);
+labels.push(r.symbol);
+parents.push(`g2:${r.group1}||${r.group2}`);
+values.push(r.value);
+colors.push(r.change);
+}
+
+return {ids, labels, parents, values, colors};
+}
+
+function render(rows) {
+const {ids, labels, parents, values, colors} = buildTreemap2Level(rows);
+lastRows = rows;
+
+const data = [{
+type: 'treemap',
+ids,
+labels,
+parents,
+values,
+branchvalues: 'total',
+marker: {
+colors,
+colorscale: 'RdYlGn',
+cmid: 0,
+line: { width: 1, color: '#ffffff' }
+},
+hovertemplate:
+'<b>%{label}</b><br>' +
+'上層：%{parent}<br>' +
+'大小：%{value}<br>' +
+'變動：%{color:.2f}<extra></extra>'
+}];
+
+Plotly.newPlot('chart', data, {margin:{l:10,r:10,t:10,b:10}}, {responsive:true, displaylogo:false});
+setMsg('已更新雙層熱力圖。', true);
+$btnCopy.disabled = true;
+}
+
+// ...（其他不動）
+</script>
