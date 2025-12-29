@@ -1,153 +1,465 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>股票熱力圖（可上傳 / 可分享）</title>
+
+  <!-- Plotly Treemap -->
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <!-- CSV parser -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Excel parser -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- URL-friendly compression -->
+  <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+
+  <style>
+    :root { --border:#e5e7eb; --muted:#6b7280; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif; }
+    header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    h1 { margin: 0; font-size: 18px; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.5; }
+    .bar { display:flex; gap:10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; }
+    button { padding: 8px 10px; border: 1px solid var(--border); background: #fff; border-radius: 10px; cursor:pointer; }
+    button:hover { background:#f9fafb; }
+    input[type="file"] { padding: 6px 0; }
+    input[type="text"], select {
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+      min-width: 260px; background:#fff;
+    }
+    #msg { padding: 0 16px 10px; color: #b91c1c; font-size: 13px; min-height: 18px; }
+    #chart { height: calc(100vh - 170px); }
+    .ok { color: #047857 !important; }
+    .drop {
+      margin: 10px 16px 0;
+      border: 2px dashed var(--border);
+      border-radius: 14px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill { font-size:12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>股票熱力圖（上傳資料 → 產生分享連結）</h1>
+    <div class="muted">
+      預設會嘗試讀取同資料夾的 <b>data.csv</b>。可拖拉/選檔上傳 CSV/XLSX/JSON。
+      「產生分享連結」會把資料壓縮後放進網址 <b>#hash</b>（適合小中型資料集）。
+      <span class="pill">提示：太多檔（例如上千檔）URL 可能過長，建議改用「從網址載入 CSV」</span>
+    </div>
+  </header>
+
+  <div class="bar">
+    <input id="file" type="file" accept=".csv,.xlsx,.xls,.json" />
+    <button id="btnLoadDefault">載入（或重載）data.csv</button>
+
+    <label class="muted" style="margin-left:4px;">顯示模式：</label>
+    <select id="mode">
+      <option value="none">單層：類股 → 股票</option>
+      <option value="subcol">雙層：類股 → 子分類欄位 → 股票</option>
+      <option value="amountbin">雙層：類股 → 成交額分級（大/中/小）→ 股票</option>
+    </select>
+
+    <button id="btnShare">產生分享連結</button>
+    <button id="btnCopy" disabled>複製分享連結</button>
+
+    <span class="muted">或從網址載入 CSV：</span>
+    <input id="csvUrl" type="text" placeholder="貼上 data.csv 的公開網址（raw）" />
+    <button id="btnLoadUrl">從網址載入</button>
+  </div>
+
+  <div class="drop">📥 你也可以把檔案直接拖曳到這個頁面任何位置放開（CSV / XLSX / JSON）。</div>
+  <div id="msg"></div>
+  <div id="chart"></div>
+
 <script>
-// ...（其他不動）
+  const $msg = document.getElementById('msg');
+  const $file = document.getElementById('file');
+  const $btnLoadDefault = document.getElementById('btnLoadDefault');
+  const $btnShare = document.getElementById('btnShare');
+  const $btnCopy = document.getElementById('btnCopy');
+  const $csvUrl = document.getElementById('csvUrl');
+  const $btnLoadUrl = document.getElementById('btnLoadUrl');
+  const $mode = document.getElementById('mode');
 
-function pickColumn(headers, candidates) {
-const lower = headers.map(h => String(h).trim().toLowerCase());
-for (const c of candidates) {
-const idx = lower.indexOf(String(c).toLowerCase());
-if (idx >= 0) return headers[idx];
-}
-return null;
-}
+  let lastRows = null;     // normalized rows
+  let lastMode = 'none';   // current mode
 
-function toNumber(x) {
-if (x === null || x === undefined) return NaN;
-if (typeof x === 'number') return x;
-const s = String(x).trim().replace('%','');
-const n = Number(s);
-return Number.isFinite(n) ? n : NaN;
-}
+  function setMsg(text, ok=false) {
+    $msg.textContent = text || '';
+    $msg.className = ok ? 'ok' : '';
+  }
 
-// ✅ 支援雙層：group1 / group2
-function normalizeRows(rawRows) {
-if (!Array.isArray(rawRows) || rawRows.length === 0) throw new Error('沒有讀到任何資料列。');
-const headers = Object.keys(rawRows[0] || {});
-if (headers.length === 0) throw new Error('找不到欄位（header）。');
+  function toNumber(x) {
+    if (x === null || x === undefined) return NaN;
+    if (typeof x === 'number') return x;
+    const s = String(x)
+      .trim()
+      .replace(/,/g,'')      // 1,234
+      .replace(/％/g,'%')    // fullwidth
+      .replace(/%/g,'');     // pct sign
+    const n = Number(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
 
-const colG1 = pickColumn(headers, ['group1','sector','類股','產業','分類1','大類']);
-const colG2 = pickColumn(headers, ['group2','industry','子產業','次類','分類2','細分']);
-const colSymbol = pickColumn(headers, ['symbol','ticker','code','代碼','股票','stock','name']);
-const colValue = pickColumn(headers, ['value','amount','turnover','成交額','成交金額','size','weight','權重']);
-const colChange = pickColumn(headers, ['change','chg','return','pct','漲跌','漲跌幅','報酬','報酬率']);
+  function pickColumn(headers, candidates) {
+    const lower = headers.map(h => String(h).trim().toLowerCase());
+    for (const c of candidates) {
+      const idx = lower.indexOf(String(c).toLowerCase());
+      if (idx >= 0) return headers[idx];
+    }
+    return null;
+  }
 
-if (!colSymbol) throw new Error('找不到「symbol」欄位（可接受：symbol/ticker/code/代碼/股票）。');
-if (!colChange) throw new Error('找不到「change」欄位（可接受：change/return/pct/漲跌幅）。');
+  // 成交額分級（大/中/小）：用 value 的分位數
+  function amountBucket(v, q1, q2) {
+    if (!Number.isFinite(v)) return '未知';
+    if (v >= q2) return '大';
+    if (v >= q1) return '中';
+    return '小';
+  }
 
-const rows = rawRows.map(r => {
-const group1 = colG1 ? String(r[colG1] ?? '未分類').trim() : '未分類';
-const group2 = colG2 ? String(r[colG2] ?? '未細分').trim() : '未細分';
-const symbol = String(r[colSymbol] ?? '').trim();
-const value = colValue ? toNumber(r[colValue]) : 1;
-const change = toNumber(r[colChange]);
+  function quantiles(values) {
+    const xs = values.filter(Number.isFinite).slice().sort((a,b)=>a-b);
+    if (xs.length === 0) return {q1:0, q2:0};
+    const q = (p) => {
+      const idx = (xs.length - 1) * p;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      if (lo === hi) return xs[lo];
+      const t = idx - lo;
+      return xs[lo] * (1 - t) + xs[hi] * t;
+    };
+    return {q1: q(0.33), q2: q(0.66)};
+  }
 
-if (!symbol) return null;
-return {
-group1,
-group2,
-symbol,
-value: Number.isFinite(value) && value > 0 ? value : 1,
-change: Number.isFinite(change) ? change : 0
-};
-}).filter(Boolean);
+  function normalizeRows(rawRows, mode) {
+    if (!Array.isArray(rawRows) || rawRows.length === 0) throw new Error('沒有讀到任何資料列。');
 
-if (rows.length === 0) throw new Error('資料列解析後為空（可能 symbol 欄位都是空的）。');
-return rows;
-}
+    const headers = Object.keys(rawRows[0] || {});
+    if (headers.length === 0) throw new Error('找不到欄位（header）。');
 
-// ✅ 雙層 treemap：root → group1 → group2 → symbol
-function buildTreemap2Level(rows) {
-// sums + weighted change for group1 & group2
-const g1Map = new Map(); // group1 -> {value, wchg}
-const g2Map = new Map(); // key=group1||group2 -> {value, wchg}
+    const colGroup  = pickColumn(headers, ['group','sector','industry','分類','產業','類別','類股']);
+    const colSub    = pickColumn(headers, ['sub','subgroup','sub_group','subsector','sub_sector','子分類','子產業','次分類','次產業','細分','細項']);
+    const colSymbol = pickColumn(headers, ['symbol','ticker','code','代碼','股票','stock','name','名稱']);
+    const colValue  = pickColumn(headers, ['value','size','market_cap','marketcap','weight','市值','權重','成交金額','成交額','amount','turnover']);
+    const colChange = pickColumn(headers, ['change','chg','return','pct','perf','漲跌','漲跌幅','報酬','報酬率','變動']);
 
-for (const r of rows) {
-// group1
-if (!g1Map.has(r.group1)) g1Map.set(r.group1, {value:0, wchg:0});
-const a = g1Map.get(r.group1);
-a.value += r.value;
-a.wchg += r.change * r.value;
+    if (!colSymbol) throw new Error('找不到「symbol」欄位（可接受：symbol/ticker/code/代碼/股票）。');
+    if (!colChange) throw new Error('找不到「change」欄位（可接受：change/return/pct/漲跌幅）。');
 
-// group2
-const k = `${r.group1}||${r.group2}`;
-if (!g2Map.has(k)) g2Map.set(k, {value:0, wchg:0});
-const b = g2Map.get(k);
-b.value += r.value;
-b.wchg += r.change * r.value;
-}
+    // 先做基本轉換
+    let rows = rawRows.map((r) => {
+      const group = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
+      const symbol = String(r[colSymbol] ?? '').trim();
+      const value = colValue ? toNumber(r[colValue]) : 1;
+      const change = toNumber(r[colChange]);
 
-const ids = [];
-const labels = [];
-const parents = [];
-const values = [];
-const colors = [];
+      if (!symbol) return null;
+      return {
+        group,
+        symbol,
+        value: Number.isFinite(value) && value > 0 ? value : 1,
+        change: Number.isFinite(change) ? change : 0,
+        sub: '' // 後面再決定
+      };
+    }).filter(Boolean);
 
-// root
-ids.push('root');
-labels.push('全部');
-parents.push('');
-const totalValue = Array.from(g1Map.values()).reduce((s,x)=>s+x.value,0);
-values.push(totalValue);
-colors.push(0);
+    if (rows.length === 0) throw new Error('資料列解析後為空（可能 symbol 欄位都是空的）。');
 
-// level 1: group1
-for (const [g1, v] of g1Map.entries()) {
-ids.push(`g1:${g1}`);
-labels.push(g1);
-parents.push('root');
-values.push(v.value);
-colors.push(v.value ? (v.wchg / v.value) : 0);
-}
+    // mode 決定第二層
+    if (mode === 'subcol') {
+      if (!colSub) throw new Error('你選了「子分類欄位」模式，但資料找不到子分類欄位（可接受：sub/subgroup/子分類/子產業/次分類…）。');
+      rows = rows.map(r => ({...r, sub: String(rawRows.find(x => String(x[colSymbol]??'').trim() === r.symbol)?.[colSub] ?? '未分類').trim() || '未分類'}));
+      return rows;
+    }
 
-// level 2: group2
-for (const [k, v] of g2Map.entries()) {
-const [g1, g2] = k.split('||');
-ids.push(`g2:${g1}||${g2}`);
-labels.push(g2);
-parents.push(`g1:${g1}`);
-values.push(v.value);
-colors.push(v.value ? (v.wchg / v.value) : 0);
-}
+    if (mode === 'amountbin') {
+      // 用每個類股內的 value 分位數來切（比較符合「類股內大小」）
+      const byGroup = new Map();
+      for (const r of rows) {
+        if (!byGroup.has(r.group)) byGroup.set(r.group, []);
+        byGroup.get(r.group).push(r.value);
+      }
+      const qMap = new Map();
+      for (const [g, vs] of byGroup.entries()) qMap.set(g, quantiles(vs));
+      rows = rows.map(r => {
+        const {q1, q2} = qMap.get(r.group) || {q1:0,q2:0};
+        return {...r, sub: `成交額${amountBucket(r.value, q1, q2)}`}; // 成交額大/中/小
+      });
+      return rows;
+    }
 
-// leaves: symbols
-for (const r of rows) {
-ids.push(`sym:${r.group1}||${r.group2}||${r.symbol}`);
-labels.push(r.symbol);
-parents.push(`g2:${r.group1}||${r.group2}`);
-values.push(r.value);
-colors.push(r.change);
-}
+    // none：不做第二層
+    return rows;
+  }
 
-return {ids, labels, parents, values, colors};
-}
+  function buildTreemap(rows, mode) {
+    // 用 ids 避免 label 重複被合併
+    const ids = [];
+    const labels = [];
+    const parents = [];
+    const values = [];
+    const colors = [];
 
-function render(rows) {
-const {ids, labels, parents, values, colors} = buildTreemap2Level(rows);
-lastRows = rows;
+    const ROOT_ID = 'root';
+    ids.push(ROOT_ID); labels.push('全部'); parents.push(''); values.push(0); colors.push(0);
 
-const data = [{
-type: 'treemap',
-ids,
-labels,
-parents,
-values,
-branchvalues: 'total',
-marker: {
-colors,
-colorscale: 'RdYlGn',
-cmid: 0,
-line: { width: 1, color: '#ffffff' }
-},
-hovertemplate:
-'<b>%{label}</b><br>' +
-'上層：%{parent}<br>' +
-'大小：%{value}<br>' +
-'變動：%{color:.2f}<extra></extra>'
-}];
+    // group aggregation
+    const groupAgg = new Map(); // group -> {value, wchg}
+    const subAgg = new Map();   // group|sub -> {value, wchg}
 
-Plotly.newPlot('chart', data, {margin:{l:10,r:10,t:10,b:10}}, {responsive:true, displaylogo:false});
-setMsg('已更新雙層熱力圖。', true);
-$btnCopy.disabled = true;
-}
+    for (const r of rows) {
+      const gKey = r.group;
+      if (!groupAgg.has(gKey)) groupAgg.set(gKey, {value:0, wchg:0});
+      const g = groupAgg.get(gKey);
+      g.value += r.value;
+      g.wchg += r.change * r.value;
 
-// ...（其他不動）
+      if (mode !== 'none') {
+        const sKey = `${r.group}||${r.sub || '未分類'}`;
+        if (!subAgg.has(sKey)) subAgg.set(sKey, {value:0, wchg:0, group:r.group, sub:(r.sub || '未分類')});
+        const s = subAgg.get(sKey);
+        s.value += r.value;
+        s.wchg += r.change * r.value;
+      }
+    }
+
+    // push groups
+    for (const [gname, g] of groupAgg.entries()) {
+      const gid = `g|${gname}`;
+      ids.push(gid);
+      labels.push(gname);
+      parents.push(ROOT_ID);
+      values.push(g.value);
+      colors.push(g.value ? (g.wchg / g.value) : 0);
+    }
+
+    // push subgroups (if any)
+    if (mode !== 'none') {
+      for (const s of subAgg.values()) {
+        const sid = `s|${s.group}|${s.sub}`;
+        ids.push(sid);
+        labels.push(s.sub);
+        parents.push(`g|${s.group}`);
+        values.push(s.value);
+        colors.push(s.value ? (s.wchg / s.value) : 0);
+      }
+    }
+
+    // push leaves
+    for (const r of rows) {
+      const parentId = (mode === 'none')
+        ? `g|${r.group}`
+        : `s|${r.group}|${r.sub || '未分類'}`;
+
+      const lid = `l|${r.group}|${r.sub || ''}|${r.symbol}`;
+      ids.push(lid);
+      labels.push(r.symbol);
+      parents.push(parentId);
+      values.push(r.value);
+      colors.push(r.change);
+    }
+
+    // root total
+    values[0] = Array.from(groupAgg.values()).reduce((s,x)=>s+x.value,0);
+    return {ids, labels, parents, values, colors};
+  }
+
+  function render(rawRowsOrNormalized) {
+    const mode = $mode.value;
+    lastMode = mode;
+
+    // 如果傳進來的是 already-normalized rows（從 hash），就直接用
+    const rows = (rawRowsOrNormalized && rawRowsOrNormalized.length && rawRowsOrNormalized[0].hasOwnProperty('group') && rawRowsOrNormalized[0].hasOwnProperty('symbol'))
+      ? rawRowsOrNormalized
+      : normalizeRows(rawRowsOrNormalized, mode);
+
+    lastRows = rows;
+
+    const {ids, labels, parents, values, colors} = buildTreemap(rows, mode);
+
+    const data = [{
+      type: 'treemap',
+      ids,
+      labels,
+      parents,
+      values,
+      branchvalues: 'total',
+      marker: {
+        colors,
+        colorscale: [
+          [0,'#1a9641'],
+          [0.5,'#ffffff'],
+          [1,'#d7191c']
+        ],
+        cmid: 0,
+        line: { width: 1, color: '#ffffff' }
+      },
+      hovertemplate:
+        '<b>%{label}</b><br>' +
+        '上層：%{parent}<br>' +
+        '大小：%{value}<br>' +
+        '變動：%{color:.2f}<extra></extra>'
+    }];
+
+    Plotly.newPlot('chart', data, {margin:{l:10,r:10,t:10,b:10}}, {responsive:true, displaylogo:false});
+    setMsg('已更新熱力圖。', true);
+    $btnCopy.disabled = true;
+  }
+
+  function loadCSVText(text) {
+    const parsed = Papa.parse(text, {header: true, skipEmptyLines: true});
+    if (parsed.errors && parsed.errors.length) {
+      throw new Error('CSV 解析錯誤：' + parsed.errors[0].message);
+    }
+    return parsed.data;
+  }
+
+  async function handleFile(file) {
+    setMsg('');
+    const name = (file.name || '').toLowerCase();
+    const buf = await file.arrayBuffer();
+
+    if (name.endsWith('.csv')) {
+      const text = new TextDecoder('utf-8').decode(buf);
+      render(loadCSVText(text));
+      return;
+    }
+    if (name.endsWith('.json')) {
+      const text = new TextDecoder('utf-8').decode(buf);
+      const raw = JSON.parse(text);
+      const rawRows = Array.isArray(raw) ? raw : (raw.rows || raw.data || []);
+      render(rawRows);
+      return;
+    }
+    if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      const wb = XLSX.read(buf, {type: 'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json(sheet, {defval: ''});
+      render(rawRows);
+      return;
+    }
+    throw new Error('不支援的檔案格式。請用 CSV / XLSX / JSON。');
+  }
+
+  function makeShareLink(mode, rows) {
+    const payload = {v: 2, mode, rows};
+    const json = JSON.stringify(payload);
+    const compressed = LZString.compressToEncodedURIComponent(json);
+    return `${location.origin}${location.pathname}#data=${compressed}`;
+  }
+
+  function tryLoadFromHash() {
+    const hash = location.hash || '';
+    if (!hash.startsWith('#data=')) return false;
+    try {
+      const encoded = hash.slice(6);
+      const json = LZString.decompressFromEncodedURIComponent(encoded);
+      const payload = JSON.parse(json);
+
+      // 相容舊版 v1
+      if (payload && payload.v === 1 && Array.isArray(payload.rows)) {
+        $mode.value = 'none';
+        render(payload.rows);
+        setMsg('已從分享連結載入資料（舊版 v1）。', true);
+        return true;
+      }
+
+      if (!payload || !Array.isArray(payload.rows)) throw new Error('hash 內容不正確');
+      if (payload.mode) $mode.value = payload.mode;
+
+      render(payload.rows); // rows 已是 normalized
+      setMsg('已從分享連結載入資料。', true);
+      return true;
+    } catch (e) {
+      setMsg('分享連結解析失敗：' + (e?.message || e));
+      return false;
+    }
+  }
+
+  async function loadFromUrl(url) {
+    setMsg('');
+    if (!url) throw new Error('請貼上 CSV 的公開網址。');
+    const res = await fetch(url, {cache: 'no-store'});
+    if (!res.ok) throw new Error(`抓取失敗：HTTP ${res.status}`);
+    const text = await res.text();
+    render(loadCSVText(text));
+  }
+
+  async function loadDefaultCSV() {
+    try {
+      const res = await fetch('./data.csv', {cache: 'no-store'});
+      if (!res.ok) throw new Error(`抓取 data.csv 失敗：HTTP ${res.status}`);
+      const text = await res.text();
+      render(loadCSVText(text));
+      setMsg('已載入 data.csv。', true);
+    } catch (e) {
+      setMsg('載入 data.csv 失敗（本機 file:// 常見限制，部署到 Pages 就正常）：' + (e?.message || e));
+    }
+  }
+
+  // events
+  $file.addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try { await handleFile(f); }
+    catch (err) { setMsg(err?.message || String(err)); }
+  });
+
+  // drag & drop
+  window.addEventListener('dragover', (e) => { e.preventDefault(); });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0];
+    if (!f) return;
+    try { await handleFile(f); }
+    catch (err) { setMsg(err?.message || String(err)); }
+  });
+
+  $btnLoadDefault.addEventListener('click', loadDefaultCSV);
+
+  // 改模式：直接用 lastRows 重新畫（如果 lastRows 是 normalized，模式切換需要回到 raw 才能重算 sub）
+  // 簡化做法：提示使用者切換模式後重載檔案/URL 或 data.csv
+  $mode.addEventListener('change', () => {
+    setMsg('已切換顯示模式。建議重新載入檔案（或重載 data.csv）以套用新模式。', true);
+    $btnCopy.disabled = true;
+  });
+
+  document.getElementById('btnShare').addEventListener('click', () => {
+    try {
+      if (!lastRows) throw new Error('請先上傳資料或成功載入 data.csv。');
+      const url = makeShareLink($mode.value, lastRows);
+      location.hash = url.split('#')[1];
+      setMsg('已產生分享連結（資料已寫入網址 #hash）。可按「複製分享連結」。', true);
+      $btnCopy.disabled = false;
+    } catch (err) {
+      setMsg(err?.message || String(err));
+    }
+  });
+
+  $btnCopy.addEventListener('click', async () => {
+    try {
+      const url = `${location.origin}${location.pathname}${location.hash}`;
+      await navigator.clipboard.writeText(url);
+      setMsg('已複製到剪貼簿。', true);
+    } catch (err) {
+      setMsg('複製失敗：你可以直接手動複製網址列。');
+    }
+  });
+
+  $btnLoadUrl.addEventListener('click', async () => {
+    try { await loadFromUrl($csvUrl.value.trim()); }
+    catch (err) { setMsg(err?.message || String(err)); }
+  });
+
+  // boot
+  if (!tryLoadFromHash()) {
+    loadDefaultCSV();
+  }
 </script>
+</body>
+</html>
