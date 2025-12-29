@@ -40,6 +40,9 @@
       font-size: 13px;
     }
     .pill { font-size:12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
+
+    /* ★新增：時間顯示區塊 */
+    .timebar { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; align-items:center; }
   </style>
 </head>
 
@@ -50,6 +53,12 @@
       預設會嘗試讀取同資料夾的 <b>data.csv</b>。可拖拉/選檔上傳 CSV/XLSX/JSON。
       「產生分享連結」會把資料壓縮後放進網址 <b>#hash</b>（適合小中型資料集）。
       <span class="pill">提示：太多檔（例如上千檔）URL 可能過長，建議改用「從網址載入 CSV」</span>
+
+      <!-- ★新增：時間顯示（台北時間 + data.csv 最後更新時間） -->
+      <div class="timebar">
+        <span id="clockNow" class="pill">現在時間：--</span>
+        <span id="dataUpdated" class="pill">資料更新：--</span>
+      </div>
     </div>
   </header>
 
@@ -98,6 +107,52 @@
   // 把任何錯誤顯示到畫面上（避免 Pages 看起來一片白）
   window.addEventListener('error', (e) => setMsg('⚠️ JS 錯誤：' + (e?.message || e), false));
   window.addEventListener('unhandledrejection', (e) => setMsg('⚠️ Promise 錯誤：' + (e?.reason?.message || e?.reason || e), false));
+
+  // =========================
+  // ★新增：時間（台北）+ data.csv 最後更新時間（GitHub commits API）
+  // =========================
+  function startClockNow() {
+    const el = document.getElementById('clockNow');
+    if (!el) return;
+
+    const fmt = new Intl.DateTimeFormat('zh-Hant-TW', {
+      year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit',
+      hour12:false,
+      timeZone:'Asia/Taipei'
+    });
+
+    const tick = () => { el.textContent = `現在時間：${fmt.format(new Date())}`; };
+    tick();
+    setInterval(tick, 1000);
+  }
+
+  async function showDataUpdatedAt() {
+    const el = document.getElementById('dataUpdated');
+    if (!el) return;
+
+    // 依你的 Pages 網址推得：
+    // https://twfcinv-svg.github.io/stock-heatmap1229/
+    const owner = "twfcinv-svg";
+    const repo  = "stock-heatmap1229";
+    const path  = "data.csv";
+
+    try {
+      const api = `https://api.github.com/repos/${owner}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=1`;
+      const res = await fetch(api, { headers: { 'Accept': 'application/vnd.github+json' }, cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const arr = await res.json();
+
+      const iso = arr?.[0]?.commit?.committer?.date || arr?.[0]?.commit?.author?.date;
+      if (!iso) throw new Error('找不到 commit 時間');
+
+      const d = new Date(iso);
+      el.textContent = `資料更新：${d.toLocaleString('zh-Hant-TW', { timeZone:'Asia/Taipei', hour12:false })}`;
+    } catch (e) {
+      el.textContent = `資料更新：讀取失敗`;
+    }
+  }
+  // =========================
 
   function toNumber(x) {
     if (x === null || x === undefined) return NaN;
@@ -317,6 +372,9 @@
     Plotly.newPlot('chart', data, {margin:{l:10,r:10,t:10,b:10}}, {responsive:true, displaylogo:false});
     setMsg(`已更新熱力圖（模式：${mode}）。`, true);
     $btnCopy.disabled = true;
+
+    // ★新增：每次成功渲染後順便更新「資料更新時間」（避免你更新 csv 後要手動刷新才看到）
+    showDataUpdatedAt();
   }
 
   function loadCSVText(text) {
@@ -476,6 +534,9 @@
   });
 
   // boot
+  startClockNow();
+  showDataUpdatedAt();
+
   if (!tryLoadFromHash()) {
     loadDefaultCSV();
   }
