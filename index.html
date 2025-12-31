@@ -26,10 +26,10 @@
     input[type="file"] { padding: 6px 0; }
     input[type="text"], select {
       padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
-      min-width: 260px; background:#fff;
+      min-width: 220px; background:#fff;
     }
     #msg { padding: 0 16px 10px; color: #b91c1c; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
-    #chart { height: calc(100vh - 170px); }
+    #chart { height: calc(100vh - 190px); }
     .ok { color: #047857 !important; }
     .drop {
       margin: 10px 16px 0;
@@ -40,8 +40,6 @@
       font-size: 13px;
     }
     .pill { font-size:12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
-
-    /* ★新增：時間顯示區塊 */
     .timebar { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; align-items:center; }
   </style>
 </head>
@@ -54,7 +52,6 @@
       「產生分享連結」會把資料壓縮後放進網址 <b>#hash</b>（適合小中型資料集）。
       <span class="pill">提示：太多檔（例如上千檔）URL 可能過長，建議改用「從網址載入 CSV」</span>
 
-      <!-- ★新增：時間顯示（台北時間 + data.csv 最後更新時間） -->
       <div class="timebar">
         <span id="clockNow" class="pill">現在時間：--</span>
         <span id="dataUpdated" class="pill">資料更新：--</span>
@@ -65,6 +62,15 @@
   <div class="bar">
     <input id="file" type="file" accept=".csv,.xlsx,.xls,.json" />
     <button id="btnLoadDefault">載入（或重載）data.csv</button>
+
+    <label class="muted" style="margin-left:4px;">期間：</label>
+    <select id="horizon">
+      <option value="5d">近5日</option>
+      <option value="20d">近20日</option>
+      <option value="60d">近60日</option>
+      <option value="1y">近一年</option>
+      <option value="ytd">YTD</option>
+    </select>
 
     <label class="muted" style="margin-left:4px;">顯示模式：</label>
     <select id="mode">
@@ -94,23 +100,22 @@
   const $csvUrl = document.getElementById('csvUrl');
   const $btnLoadUrl = document.getElementById('btnLoadUrl');
   const $mode = document.getElementById('mode');
+  const $horizon = document.getElementById('horizon');
 
-  let lastRawRows = null;  // ★保留原始 rows（CSV/XLSX/JSON 解析後）
-  let lastRows = null;     // normalized rows（包含 group/sub/symbol/value/change）
+  let lastRawRows = null;  // 原始 rows
+  let lastRows = null;     // normalized rows
   let lastMode = 'none';
+  let lastHorizon = '5d';
 
   function setMsg(text, ok=false) {
     $msg.textContent = text || '';
     $msg.className = ok ? 'ok' : '';
   }
 
-  // 把任何錯誤顯示到畫面上（避免 Pages 看起來一片白）
   window.addEventListener('error', (e) => setMsg('⚠️ JS 錯誤：' + (e?.message || e), false));
   window.addEventListener('unhandledrejection', (e) => setMsg('⚠️ Promise 錯誤：' + (e?.reason?.message || e?.reason || e), false));
 
-  // =========================
-  // ★新增：時間（台北）+ data.csv 最後更新時間（GitHub commits API）
-  // =========================
+  // ===== 時間顯示 =====
   function startClockNow() {
     const el = document.getElementById('clockNow');
     if (!el) return;
@@ -131,8 +136,6 @@
     const el = document.getElementById('dataUpdated');
     if (!el) return;
 
-    // 依你的 Pages 網址推得：
-    // https://twfcinv-svg.github.io/stock-heatmap1229/
     const owner = "twfcinv-svg";
     const repo  = "stock-heatmap1229";
     const path  = "data.csv";
@@ -152,16 +155,21 @@
       el.textContent = `資料更新：讀取失敗`;
     }
   }
-  // =========================
+  // ===================
+
+  function horizonLabel(h) {
+    const map = { '5d':'近5日', '20d':'近20日', '60d':'近60日', '1y':'近一年', 'ytd':'YTD' };
+    return map[h] || h;
+  }
 
   function toNumber(x) {
     if (x === null || x === undefined) return NaN;
     if (typeof x === 'number') return x;
     const s = String(x)
       .trim()
-      .replace(/,/g,'')      // 1,234
-      .replace(/％/g,'%')    // fullwidth
-      .replace(/%/g,'');     // pct sign
+      .replace(/,/g,'')
+      .replace(/％/g,'%')
+      .replace(/%/g,'');
     const n = Number(s);
     return Number.isFinite(n) ? n : NaN;
   }
@@ -195,7 +203,19 @@
     return '小';
   }
 
-  function normalizeRows(rawRows, mode) {
+  // ★期間欄位候選（你可依你的 CSV 欄名再加）
+  function changeCandidatesByHorizon(h) {
+    const map = {
+      '5d':  ['chg_5d','change_5d','ret_5d','r5d','5d','近5日','5日','五日'],
+      '20d': ['chg_20d','change_20d','ret_20d','r20d','20d','近20日','20日','二十日','月'],
+      '60d': ['chg_60d','change_60d','ret_60d','r60d','60d','近60日','60日','三月'],
+      '1y':  ['chg_1y','change_1y','ret_1y','r1y','1y','1yr','近一年','1年','一年'],
+      'ytd': ['ytd','chg_ytd','change_ytd','ret_ytd','今年以來','年初至今']
+    };
+    return map[h] || map['5d'];
+  }
+
+  function normalizeRows(rawRows, mode, horizon) {
     if (!Array.isArray(rawRows) || rawRows.length === 0) throw new Error('沒有讀到任何資料列。');
 
     const headers = Object.keys(rawRows[0] || {});
@@ -205,12 +225,15 @@
     const colSub    = pickColumn(headers, ['sub','subgroup','sub_group','subsector','sub_sector','子分類','子產業','次分類','次產業','細分','細項']);
     const colSymbol = pickColumn(headers, ['symbol','ticker','code','代碼','股票','stock','name','名稱']);
     const colValue  = pickColumn(headers, ['value','size','market_cap','marketcap','weight','市值','權重','成交金額','成交額','amount','turnover']);
-    const colChange = pickColumn(headers, ['change','chg','return','pct','perf','漲跌','漲跌幅','報酬','報酬率','變動']);
+
+    // ★依期間挑 change 欄位
+    const colChange = pickColumn(headers, changeCandidatesByHorizon(horizon));
 
     if (!colSymbol) throw new Error('找不到「symbol」欄位（可接受：symbol/ticker/code/代碼/股票/名稱）。');
-    if (!colChange) throw new Error('找不到「change」欄位（可接受：change/return/pct/漲跌幅/報酬率/變動）。');
+    if (!colChange) {
+      throw new Error(`找不到「${horizonLabel(horizon)}」對應的變動欄位。\n請在資料中提供其中一個欄位：\n${changeCandidatesByHorizon(horizon).join(' / ')}`);
+    }
 
-    // 先把 rawRows 轉成基本結構（sub 之後依 mode 決定）
     let rows = rawRows.map((r) => {
       const group = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
       const symbol = String(r[colSymbol] ?? '').trim();
@@ -230,7 +253,6 @@
 
     if (mode === 'subcol') {
       if (!colSub) throw new Error('你選了「子分類欄位」模式，但資料找不到子分類欄位（可接受：sub/subgroup/子分類/子產業/次分類…）。');
-      // ★直接吃同一列的 sub（不要用 find）
       rows = rawRows.map((r) => {
         const group = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
         const symbol = String(r[colSymbol] ?? '').trim();
@@ -266,7 +288,6 @@
       return rows;
     }
 
-    // none：不做第二層
     return rows;
   }
 
@@ -280,8 +301,8 @@
     values.push(0);
     colors.push(0);
 
-    const groupAgg = new Map(); // group -> {value, wchg}
-    const subAgg = new Map();   // group||sub -> {value, wchg, group, sub}
+    const groupAgg = new Map();
+    const subAgg = new Map();
 
     for (const r of rows) {
       if (!groupAgg.has(r.group)) groupAgg.set(r.group, {value:0, wchg:0});
@@ -337,10 +358,12 @@
 
   function render(rawRows) {
     const mode = $mode.value;
-    lastMode = mode;
+    const horizon = $horizon.value;
 
-    // ★永遠把 rawRows 做 normalize（因為 raw CSV 也可能剛好有 group/symbol）
-    const rows = normalizeRows(rawRows, mode);
+    lastMode = mode;
+    lastHorizon = horizon;
+
+    const rows = normalizeRows(rawRows, mode, horizon);
     lastRows = rows;
 
     const {ids, labels, parents, values, colors} = buildTreemap(rows, mode);
@@ -356,24 +379,23 @@
         colors,
         colorscale: [
           [0,'#1a9641'],
-          [0.5,'#f3f4f6'],     // ★避免全白看不到
+          [0.5,'#f3f4f6'],
           [1,'#d7191c']
         ],
         cmid: 0,
-        line: { width: 1, color: '#d1d5db' } // ★避免白邊框融掉
+        line: { width: 1, color: '#d1d5db' }
       },
       hovertemplate:
-        '<b>%{label}</b><br>' +
-        '上層：%{parent}<br>' +
-        '大小：%{value}<br>' +
-        '變動：%{color:.2f}<extra></extra>'
+        `<b>%{label}</b><br>` +
+        `上層：%{parent}<br>` +
+        `大小：%{value}<br>` +
+        `變動（${horizonLabel(horizon)}）：%{color:.2f}<extra></extra>`
     }];
 
     Plotly.newPlot('chart', data, {margin:{l:10,r:10,t:10,b:10}}, {responsive:true, displaylogo:false});
-    setMsg(`已更新熱力圖（模式：${mode}）。`, true);
+    setMsg(`已更新熱力圖（期間：${horizonLabel(horizon)}；模式：${mode}）。`, true);
     $btnCopy.disabled = true;
 
-    // ★新增：每次成功渲染後順便更新「資料更新時間」（避免你更新 csv 後要手動刷新才看到）
     showDataUpdatedAt();
   }
 
@@ -413,8 +435,9 @@
     throw new Error('不支援的檔案格式。請用 CSV / XLSX / JSON。');
   }
 
-  function makeShareLink(mode, rawRows) {
-    const payload = {v: 3, mode, rawRows};
+  // ★分享連結：把 horizon 一起存進去
+  function makeShareLink(mode, horizon, rawRows) {
+    const payload = {v: 4, mode, horizon, rawRows};
     const json = JSON.stringify(payload);
     const compressed = LZString.compressToEncodedURIComponent(json);
     return `${location.origin}${location.pathname}#data=${compressed}`;
@@ -428,16 +451,16 @@
       const json = LZString.decompressFromEncodedURIComponent(encoded);
       const payload = JSON.parse(json);
 
-      // 相容舊版 v1/v2（它們可能用 rows 存）
+      if (payload?.mode) $mode.value = payload.mode;
+      if (payload?.horizon) $horizon.value = payload.horizon;
+
       if (payload?.rawRows && Array.isArray(payload.rawRows)) {
-        if (payload.mode) $mode.value = payload.mode;
         lastRawRows = payload.rawRows;
         render(lastRawRows);
         setMsg('已從分享連結載入資料。', true);
         return true;
       }
       if (payload?.rows && Array.isArray(payload.rows)) {
-        if (payload.mode) $mode.value = payload.mode;
         lastRawRows = payload.rows;
         render(lastRawRows);
         setMsg('已從分享連結載入資料（舊格式相容）。', true);
@@ -493,7 +516,7 @@
 
   $btnLoadDefault.addEventListener('click', loadDefaultCSV);
 
-  // ★切換模式立刻用原始資料重算
+  // ★切換模式立刻重算
   $mode.addEventListener('change', () => {
     try {
       if (!lastRawRows) {
@@ -506,10 +529,23 @@
     }
   });
 
+  // ★切換期間立刻重算
+  $horizon.addEventListener('change', () => {
+    try {
+      if (!lastRawRows) {
+        setMsg('已切換期間。請先載入 data.csv 或上傳檔案。', true);
+        return;
+      }
+      render(lastRawRows);
+    } catch (e) {
+      setMsg(e?.message || String(e));
+    }
+  });
+
   $btnShare.addEventListener('click', () => {
     try {
       if (!lastRawRows) throw new Error('請先上傳資料或成功載入 data.csv。');
-      const url = makeShareLink($mode.value, lastRawRows);
+      const url = makeShareLink($mode.value, $horizon.value, lastRawRows);
       location.hash = url.split('#')[1];
       setMsg('已產生分享連結（資料已寫入網址 #hash）。可按「複製分享連結」。', true);
       $btnCopy.disabled = false;
