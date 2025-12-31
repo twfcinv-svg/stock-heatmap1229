@@ -64,8 +64,8 @@
 
     <label class="muted" style="margin-left:4px;">期間：</label>
     <select id="horizon">
-      <option value="1d">近1日</option>
-      <option value="5d" selected>近5日</option>
+      <option value="1d" selected>近1日</option>
+      <option value="5d">近5日</option>
       <option value="20d">近20日</option>
       <option value="60d">近60日</option>
       <option value="1y">近一年</option>
@@ -105,7 +105,7 @@
   let lastRawRows = null;  // 原始 rows
   let lastRows = null;     // normalized rows
   let lastMode = 'none';
-  let lastHorizon = '5d';
+  let lastHorizon = '1d';
 
   function setMsg(text, ok=false) {
     $msg.textContent = text || '';
@@ -175,7 +175,7 @@
     return Number.isFinite(n) ? n : NaN;
   }
 
-  // ★新增：顯示在 symbol 底下的漲跌幅格式（1 位小數）
+  // ★顯示在 symbol 底下的漲跌幅格式（1 位小數）
   function fmtPct(x, digits=1) {
     const n = Number(x);
     if (!Number.isFinite(n)) return '';
@@ -258,7 +258,7 @@
       );
     }
 
-    // ★依期間挑「報酬」當顏色（必要；但有 common fallback）
+    // ★依期間挑「報酬」當顏色（必要）
     const colChange = pickColumn(headers, changeCandidatesByHorizon(horizon));
 
     if (!colSymbol) throw new Error('找不到「symbol」欄位（可接受：symbol/ticker/code/代碼/股票/名稱）。');
@@ -383,7 +383,7 @@
       const lid = `l|${r.group}|${r.sub || ''}|${r.symbol}`;
       ids.push(lid);
 
-      // ★重點：葉節點 label = symbol + 換行 + 漲跌幅（1位小數）
+      // ★葉節點 label = symbol + 換行 + 漲跌幅（1位小數）
       labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
 
       parents.push(parentId);
@@ -414,7 +414,7 @@
       parents,
       values,
       branchvalues: 'total',
-      textinfo: 'label', // ★只顯示 label（避免 Plotly 自動塞 value）
+      textinfo: 'label',
       marker: {
         colors,
         colorscale: [
@@ -475,7 +475,6 @@
     throw new Error('不支援的檔案格式。請用 CSV / XLSX / JSON。');
   }
 
-  // ★分享連結：把 mode + horizon 一起存進去
   function makeShareLink(mode, horizon, rawRows) {
     const payload = {v: 5, mode, horizon, rawRows};
     const json = JSON.stringify(payload);
@@ -500,7 +499,7 @@
         setMsg('已從分享連結載入資料。', true);
         return true;
       }
-      if (payload?.rows && Array.isArray(payload.rows)) { // 舊格式相容
+      if (payload?.rows && Array.isArray(payload.rows)) {
         lastRawRows = payload.rows;
         render(lastRawRows);
         setMsg('已從分享連結載入資料（舊格式相容）。', true);
@@ -611,4 +610,3 @@
 </script>
 </body>
 </html>
-
