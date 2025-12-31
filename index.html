@@ -175,6 +175,14 @@
     return Number.isFinite(n) ? n : NaN;
   }
 
+  // ★新增：顯示在 symbol 底下的漲跌幅格式（1 位小數）
+  function fmtPct(x, digits=1) {
+    const n = Number(x);
+    if (!Number.isFinite(n)) return '';
+    const sign = n > 0 ? '+' : '';
+    return `${sign}${n.toFixed(digits)}%`;
+  }
+
   function pickColumn(headers, candidates) {
     const lower = headers.map(h => String(h).trim().toLowerCase());
     for (const c of candidates) {
@@ -220,7 +228,6 @@
 
   // ★面積（量）欄位候選：依期間
   function valueCandidatesByHorizon(h) {
-    // 你若用固定命名（amt_1d/amt_5d/...），最穩就是第一個就會命中
     const map = {
       '1d':  ['amt_1d','amount_1d','turnover_1d','value_1d','vol_1d','近1日成交額','1日成交額','1日均量'],
       '5d':  ['amt_5d','amount_5d','turnover_5d','value_5d','vol_5d','近5日成交額','5日成交額','5日均量'],
@@ -375,7 +382,10 @@
 
       const lid = `l|${r.group}|${r.sub || ''}|${r.symbol}`;
       ids.push(lid);
-      labels.push(r.symbol);
+
+      // ★重點：葉節點 label = symbol + 換行 + 漲跌幅（1位小數）
+      labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
+
       parents.push(parentId);
       values.push(r.value);
       colors.push(r.change);
@@ -404,6 +414,7 @@
       parents,
       values,
       branchvalues: 'total',
+      textinfo: 'label', // ★只顯示 label（避免 Plotly 自動塞 value）
       marker: {
         colors,
         colorscale: [
