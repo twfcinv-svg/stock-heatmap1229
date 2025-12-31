@@ -29,7 +29,7 @@
       min-width: 220px; background:#fff;
     }
     #msg { padding: 0 16px 10px; color: #b91c1c; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
-    #chart { height: calc(100vh - 190px); }
+    #chart { height: calc(100vh - 200px); }
     .ok { color: #047857 !important; }
     .drop {
       margin: 10px 16px 0;
@@ -51,7 +51,6 @@
       預設會嘗試讀取同資料夾的 <b>data.csv</b>。可拖拉/選檔上傳 CSV/XLSX/JSON。
       「產生分享連結」會把資料壓縮後放進網址 <b>#hash</b>（適合小中型資料集）。
       <span class="pill">提示：太多檔（例如上千檔）URL 可能過長，建議改用「從網址載入 CSV」</span>
-
       <div class="timebar">
         <span id="clockNow" class="pill">現在時間：--</span>
         <span id="dataUpdated" class="pill">資料更新：--</span>
@@ -65,7 +64,8 @@
 
     <label class="muted" style="margin-left:4px;">期間：</label>
     <select id="horizon">
-      <option value="5d">近5日</option>
+      <option value="1d">近1日</option>
+      <option value="5d" selected>近5日</option>
       <option value="20d">近20日</option>
       <option value="60d">近60日</option>
       <option value="1y">近一年</option>
@@ -136,6 +136,7 @@
     const el = document.getElementById('dataUpdated');
     if (!el) return;
 
+    // 你原本寫死的 repo 資訊（需要換 repo 記得改）
     const owner = "twfcinv-svg";
     const repo  = "stock-heatmap1229";
     const path  = "data.csv";
@@ -158,7 +159,7 @@
   // ===================
 
   function horizonLabel(h) {
-    const map = { '5d':'近5日', '20d':'近20日', '60d':'近60日', '1y':'近一年', 'ytd':'YTD' };
+    const map = { '1d':'近1日', '5d':'近5日', '20d':'近20日', '60d':'近60日', '1y':'近一年', 'ytd':'YTD' };
     return map[h] || h;
   }
 
@@ -203,14 +204,30 @@
     return '小';
   }
 
-  // ★期間欄位候選（你可依你的 CSV 欄名再加）
+  // ★顏色（報酬）欄位候選：依期間
   function changeCandidatesByHorizon(h) {
+    const common = ['change','chg','return','pct','perf','漲跌','漲跌幅','報酬','報酬率','變動'];
     const map = {
-      '5d':  ['chg_5d','change_5d','ret_5d','r5d','5d','近5日','5日','五日'],
-      '20d': ['chg_20d','change_20d','ret_20d','r20d','20d','近20日','20日','二十日','月'],
-      '60d': ['chg_60d','change_60d','ret_60d','r60d','60d','近60日','60日','三月'],
-      '1y':  ['chg_1y','change_1y','ret_1y','r1y','1y','1yr','近一年','1年','一年'],
-      'ytd': ['ytd','chg_ytd','change_ytd','ret_ytd','今年以來','年初至今']
+      '1d':  ['chg_1d','change_1d','ret_1d','r1d','1d','近1日','1日','一日', ...common],
+      '5d':  ['chg_5d','change_5d','ret_5d','r5d','5d','近5日','5日','五日', ...common],
+      '20d': ['chg_20d','change_20d','ret_20d','r20d','20d','近20日','20日','二十日','月', ...common],
+      '60d': ['chg_60d','change_60d','ret_60d','r60d','60d','近60日','60日','三月', ...common],
+      '1y':  ['chg_1y','change_1y','ret_1y','r1y','1y','1yr','近一年','1年','一年', ...common],
+      'ytd': ['ytd','chg_ytd','change_ytd','ret_ytd','今年以來','年初至今', ...common]
+    };
+    return map[h] || map['5d'];
+  }
+
+  // ★面積（量）欄位候選：依期間
+  function valueCandidatesByHorizon(h) {
+    // 你若用固定命名（amt_1d/amt_5d/...），最穩就是第一個就會命中
+    const map = {
+      '1d':  ['amt_1d','amount_1d','turnover_1d','value_1d','vol_1d','近1日成交額','1日成交額','1日均量'],
+      '5d':  ['amt_5d','amount_5d','turnover_5d','value_5d','vol_5d','近5日成交額','5日成交額','5日均量'],
+      '20d': ['amt_20d','amount_20d','turnover_20d','value_20d','vol_20d','近20日成交額','20日成交額','20日均量'],
+      '60d': ['amt_60d','amount_60d','turnover_60d','value_60d','vol_60d','近60日成交額','60日成交額','60日均量'],
+      '1y':  ['amt_1y','amount_1y','turnover_1y','value_1y','vol_1y','近一年成交額','1年成交額','一年成交額'],
+      'ytd': ['amt_ytd','amount_ytd','turnover_ytd','value_ytd','vol_ytd','ytd_amount','今年以來成交額','年初至今成交額']
     };
     return map[h] || map['5d'];
   }
@@ -224,20 +241,32 @@
     const colGroup  = pickColumn(headers, ['group','sector','industry','分類','產業','類別','類股']);
     const colSub    = pickColumn(headers, ['sub','subgroup','sub_group','subsector','sub_sector','子分類','子產業','次分類','次產業','細分','細項']);
     const colSymbol = pickColumn(headers, ['symbol','ticker','code','代碼','股票','stock','name','名稱']);
-    const colValue  = pickColumn(headers, ['value','size','market_cap','marketcap','weight','市值','權重','成交金額','成交額','amount','turnover']);
 
-    // ★依期間挑 change 欄位
+    // ★依期間挑「量」當面積（必要）
+    const colValue  = pickColumn(headers, valueCandidatesByHorizon(horizon));
+    if (!colValue) {
+      throw new Error(
+        `找不到「${horizonLabel(horizon)}」對應的量(面積)欄位。\n` +
+        `請提供其中一個欄位：\n${valueCandidatesByHorizon(horizon).join(' / ')}`
+      );
+    }
+
+    // ★依期間挑「報酬」當顏色（必要；但有 common fallback）
     const colChange = pickColumn(headers, changeCandidatesByHorizon(horizon));
 
     if (!colSymbol) throw new Error('找不到「symbol」欄位（可接受：symbol/ticker/code/代碼/股票/名稱）。');
     if (!colChange) {
-      throw new Error(`找不到「${horizonLabel(horizon)}」對應的變動欄位。\n請在資料中提供其中一個欄位：\n${changeCandidatesByHorizon(horizon).join(' / ')}`);
+      throw new Error(
+        `找不到「${horizonLabel(horizon)}」對應的變動(顏色)欄位。\n` +
+        `請提供其中一個欄位：\n${changeCandidatesByHorizon(horizon).join(' / ')}`
+      );
     }
 
+    // 先轉成基本結構（sub 後續依 mode 決定）
     let rows = rawRows.map((r) => {
       const group = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
       const symbol = String(r[colSymbol] ?? '').trim();
-      const value = colValue ? toNumber(r[colValue]) : 1;
+      const value = toNumber(r[colValue]);
       const change = toNumber(r[colChange]);
       if (!symbol) return null;
       return {
@@ -256,7 +285,7 @@
       rows = rawRows.map((r) => {
         const group = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
         const symbol = String(r[colSymbol] ?? '').trim();
-        const value = colValue ? toNumber(r[colValue]) : 1;
+        const value = toNumber(r[colValue]);
         const change = toNumber(r[colChange]);
         const sub = String(r[colSub] ?? '未分類').trim() || '未分類';
         if (!symbol) return null;
@@ -388,7 +417,7 @@
       hovertemplate:
         `<b>%{label}</b><br>` +
         `上層：%{parent}<br>` +
-        `大小：%{value}<br>` +
+        `量（${horizonLabel(horizon)}）：%{value}<br>` +
         `變動（${horizonLabel(horizon)}）：%{color:.2f}<extra></extra>`
     }];
 
@@ -435,9 +464,9 @@
     throw new Error('不支援的檔案格式。請用 CSV / XLSX / JSON。');
   }
 
-  // ★分享連結：把 horizon 一起存進去
+  // ★分享連結：把 mode + horizon 一起存進去
   function makeShareLink(mode, horizon, rawRows) {
-    const payload = {v: 4, mode, horizon, rawRows};
+    const payload = {v: 5, mode, horizon, rawRows};
     const json = JSON.stringify(payload);
     const compressed = LZString.compressToEncodedURIComponent(json);
     return `${location.origin}${location.pathname}#data=${compressed}`;
@@ -460,7 +489,7 @@
         setMsg('已從分享連結載入資料。', true);
         return true;
       }
-      if (payload?.rows && Array.isArray(payload.rows)) {
+      if (payload?.rows && Array.isArray(payload.rows)) { // 舊格式相容
         lastRawRows = payload.rows;
         render(lastRawRows);
         setMsg('已從分享連結載入資料（舊格式相容）。', true);
@@ -516,26 +545,18 @@
 
   $btnLoadDefault.addEventListener('click', loadDefaultCSV);
 
-  // ★切換模式立刻重算
   $mode.addEventListener('change', () => {
     try {
-      if (!lastRawRows) {
-        setMsg('已切換顯示模式。請先載入 data.csv 或上傳檔案。', true);
-        return;
-      }
+      if (!lastRawRows) { setMsg('已切換顯示模式。請先載入 data.csv 或上傳檔案。', true); return; }
       render(lastRawRows);
     } catch (e) {
       setMsg(e?.message || String(e));
     }
   });
 
-  // ★切換期間立刻重算
   $horizon.addEventListener('change', () => {
     try {
-      if (!lastRawRows) {
-        setMsg('已切換期間。請先載入 data.csv 或上傳檔案。', true);
-        return;
-      }
+      if (!lastRawRows) { setMsg('已切換期間。請先載入 data.csv 或上傳檔案。', true); return; }
       render(lastRawRows);
     } catch (e) {
       setMsg(e?.message || String(e));
