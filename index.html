@@ -223,7 +223,7 @@
       '1y':  ['chg_1y','change_1y','ret_1y','r1y','1y','1yr','近一年','1年','一年', ...common],
       'ytd': ['ytd','chg_ytd','change_ytd','ret_ytd','今年以來','年初至今', ...common]
     };
-    return map[h] || map['5d'];
+    return map[h] || map['1d'];
   }
 
   // ★面積（量）欄位候選：依期間
@@ -236,7 +236,7 @@
       '1y':  ['amt_1y','amount_1y','turnover_1y','value_1y','vol_1y','近一年成交額','1年成交額','一年成交額'],
       'ytd': ['amt_ytd','amount_ytd','turnover_ytd','value_ytd','vol_ytd','ytd_amount','今年以來成交額','年初至今成交額']
     };
-    return map[h] || map['5d'];
+    return map[h] || map['1d'];
   }
 
   function normalizeRows(rawRows, mode, horizon) {
@@ -611,3 +611,4 @@
 </script>
 </body>
 </html>
+
