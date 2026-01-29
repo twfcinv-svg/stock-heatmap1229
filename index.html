@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>股票熱力圖（完整功能 + 成分股預覽）</title>
+  <title>股票熱力圖 - 成分股預覽版</title>
 
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -12,31 +12,32 @@
 
   <style>
     :root { --border:#e5e7eb; --muted:#6b7280; }
-    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif; }
-    header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; overflow-x: hidden; }
+    header { padding: 14px 16px; border-bottom: 1px solid var(--border); background: #fff; }
     h1 { margin: 0; font-size: 18px; }
-    .muted { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.5; }
-    .bar { display:flex; gap:10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; }
-    button { padding: 8px 10px; border: 1px solid var(--border); background: #fff; border-radius: 10px; cursor:pointer; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .bar { display:flex; gap:10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; background: #fdfdfd; }
+    button { padding: 8px 12px; border: 1px solid var(--border); background: #fff; border-radius: 8px; cursor:pointer; font-size: 13px; }
     button:hover { background:#f9fafb; }
-    input[type="text"], select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; min-width: 220px; }
-    #msg { padding: 0 16px 10px; color: #b91c1c; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
-    #chart { height: calc(100vh - 200px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    select, input[type="text"] { padding: 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+    #msg { padding: 10px 16px; color: #b91c1c; font-size: 13px; min-height: 20px; }
+    #chart { height: calc(100vh - 220px); width: 100%; }
     .ok { color: #047857 !important; }
-    .drop { margin: 10px 16px 0; border: 2px dashed var(--border); border-radius: 14px; padding: 10px 12px; color: var(--muted); font-size: 13px; }
-    .pill { font-size:12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
-    .timebar { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; align-items:center; }
+    .drop { margin: 10px 16px; border: 2px dashed var(--border); border-radius: 12px; padding: 12px; color: var(--muted); font-size: 12px; text-align: center; }
+    .pill { font-size:11px; padding:2px 8px; border:1px solid var(--border); border-radius:12px; color:var(--muted); background: #f3f4f6; }
+    .timebar { margin-top: 6px; display:flex; gap:8px; }
   </style>
 </head>
 
 <body>
   <header>
-    <h1>股票熱力圖（移至類股預覽成分股）</h1>
+    <h1>股票熱力圖 (Stock Heatmap)</h1>
     <div class="muted">
-      支援 CSV/XLSX/JSON。滑鼠移至類股區塊可查看前 10 大權重股。
+      移至類股區塊可查看前 10 大成分股。點擊個別股票跳轉 K 線圖。
       <div class="timebar">
-        <span id="clockNow" class="pill">現在時間：--</span>
-        <span id="dataUpdated" class="pill">資料更新：--</span>
+        <span id="clockNow" class="pill">--:--:--</span>
+        <span id="dataUpdated" class="pill">更新時間：載入中...</span>
       </div>
     </div>
   </header>
@@ -44,241 +45,215 @@
   <div class="bar">
     <input id="file" type="file" accept=".csv,.xlsx,.xls,.json" />
     <button id="btnLoadDefault">載入 data.csv</button>
-
     <select id="horizon">
-      <option value="1d" selected>近1日</option>
+      <option value="1d">近1日</option>
       <option value="5d">近5日</option>
       <option value="20d">近20日</option>
-      <option value="60d">近60日</option>
-      <option value="1y">近一年</option>
-      <option value="ytd">YTD</option>
+      <option value="ytd">今年以來</option>
     </select>
-
     <select id="mode">
-      <option value="none">單層：類股 → 股票</option>
-      <option value="subcol">雙層：類股 → 子分類 → 股票</option>
-      <option value="amountbin">雙層：類股 → 成交額分級 → 股票</option>
+      <option value="none">類股 → 股票</option>
+      <option value="subcol">類股 → 子分類 → 股票</option>
     </select>
-
-    <button id="btnShare">產生連結</button>
-    <button id="btnCopy" disabled>複製連結</button>
-    <input id="csvUrl" type="text" placeholder="貼上 CSV 網址" />
-    <button id="btnLoadUrl">從網址載入</button>
+    <button id="btnShare">分享</button>
+    <button id="btnCopy" disabled>複製網址</button>
+    <input id="csvUrl" type="text" placeholder="貼上 CSV 連結" style="flex-grow:1; min-width:150px;" />
+    <button id="btnLoadUrl">載入</button>
   </div>
 
-  <div class="drop">📥 拖曳檔案至此處載入。</div>
   <div id="msg"></div>
   <div id="chart"></div>
+  <div class="drop">💡 提示：可直接拖曳 CSV/XLSX 檔案到視窗內</div>
 
 <script>
   const $msg = document.getElementById('msg');
-  const $file = document.getElementById('file');
-  const $btnLoadDefault = document.getElementById('btnLoadDefault');
-  const $btnShare = document.getElementById('btnShare');
-  const $btnCopy = document.getElementById('btnCopy');
-  const $csvUrl = document.getElementById('csvUrl');
-  const $btnLoadUrl = document.getElementById('btnLoadUrl');
-  const $mode = document.getElementById('mode');
-  const $horizon = document.getElementById('horizon');
-
+  const $chart = document.getElementById('chart');
   let lastRawRows = null;
 
-  function setMsg(text, ok=false) {
+  function setMsg(text, isOk=false) {
     $msg.textContent = text || '';
-    $msg.className = ok ? 'ok' : '';
+    $msg.className = isOk ? 'ok' : '';
   }
 
-  // 時間與 GitHub 更新時間功能
-  function startClockNow() {
-    const el = document.getElementById('clockNow');
-    const fmt = new Intl.DateTimeFormat('zh-Hant-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false, timeZone:'Asia/Taipei' });
-    const tick = () => { if(el) el.textContent = `現在時間：${fmt.format(new Date())}`; };
-    tick(); setInterval(tick, 1000);
+  // 工具：數值與格式化
+  const toNumber = v => {
+    if (v === null || v === undefined) return NaN;
+    const n = Number(String(v).replace(/[,%]/g, ''));
+    return isFinite(n) ? n : NaN;
+  };
+  const fmtP = v => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
+
+  // 核心：解析前 10 檔
+  function getTop10Text(mems) {
+    const top = [...mems].sort((a,b) => b.value - a.value).slice(0, 10);
+    return "<b>成交金額 Top 10：</b><br>" + top.map((s,i) => `${i+1}. ${s.symbol} (${fmtP(s.change)})`).join('<br>');
   }
 
-  async function showDataUpdatedAt() {
-    const el = document.getElementById('dataUpdated');
-    try {
-      const res = await fetch(`https://api.github.com/repos/twfcinv-svg/stock-heatmap1229/commits?path=data.csv&per_page=1`, { cache: 'no-store' });
-      const arr = await res.json();
-      const d = new Date(arr?.[0]?.commit?.committer?.date);
-      if(el) el.textContent = `資料更新：${d.toLocaleString('zh-Hant-TW', { timeZone:'Asia/Taipei', hour12:false })}`;
-    } catch (e) { if(el) el.textContent = `資料更新：讀取失敗`; }
-  }
+  // 資料標準化
+  function normalize(raw, mode, horizon) {
+    if (!raw || !raw.length) throw new Error("無效資料");
+    const h = Object.keys(raw[0]);
+    const find = (arr) => {
+      for (let k of arr) {
+        let found = h.find(key => key.toLowerCase().includes(k.toLowerCase()));
+        if (found) return found;
+      }
+      return null;
+    };
 
-  // 數值處理工具
-  function toNumber(x) {
-    if (x === null || x === undefined) return NaN;
-    const s = String(x).trim().replace(/,/g,'').replace(/%/g,'');
-    const n = Number(s);
-    return Number.isFinite(n) ? n : NaN;
-  }
+    const colG = find(['group','產業','類股','category']);
+    const colS = find(['symbol','name','股票','名稱']);
+    const colC = find(['code','stock','代碼','ticker']);
+    const colSub = find(['sub','子分類','次產業']);
+    
+    // 期間欄位對應
+    const colV = find(['amt_'+horizon, 'amount_'+horizon, '成交額']);
+    const colChg = find(['chg_'+horizon, 'change_'+horizon, horizon, '漲跌']);
 
-  function fmtPct(x) {
-    const n = Number(x);
-    return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
-  }
+    if (!colV || !colChg) throw new Error(`找不到 ${horizon} 相關欄位`);
 
-  function pickColumn(headers, candidates) {
-    const lower = headers.map(h => String(h).trim().toLowerCase());
-    for (const c of candidates) {
-      const idx = lower.indexOf(String(c).toLowerCase());
-      if (idx >= 0) return headers[idx];
-    }
-    return null;
-  }
-
-  // 欄位候選清單
-  function changeCandidatesByHorizon(h) {
-    const common = ['change','chg','漲跌幅','報酬'];
-    const map = { '1d':['chg_1d','1d',...common], '5d':['chg_5d','5d',...common], '20d':['chg_20d','20d','月',...common], '60d':['chg_60d','60d',...common], '1y':['chg_1y','1y',...common], 'ytd':['ytd',...common] };
-    return map[h] || map['1d'];
-  }
-
-  function valueCandidatesByHorizon(h) {
-    const map = { '1d':['amt_1d','amount_1d','成交額'], '5d':['amt_5d','5d成交額'], '20d':['amt_20d','20d成交額'], '60d':['amt_60d'], '1y':['amt_1y'], 'ytd':['amt_ytd'] };
-    return map[h] || map['1d'];
-  }
-
-  // 生成成分股清單文字
-  function formatTop10(stockList) {
-    const top10 = stockList.sort((a, b) => b.value - a.value).slice(0, 10);
-    let str = "<b>成交額前 10 名：</b><br>";
-    top10.forEach((s, i) => { str += `${i+1}. ${s.symbol} (${fmtPct(s.change)})<br>`; });
-    return str;
-  }
-
-  function normalizeRows(rawRows, mode, horizon) {
-    if (!rawRows || rawRows.length === 0) throw new Error('資料為空');
-    const headers = Object.keys(rawRows[0]);
-    const colGroup = pickColumn(headers, ['group','產業','類別','類股']);
-    const colSub = pickColumn(headers, ['sub','子分類','次產業']);
-    const colSymbol = pickColumn(headers, ['symbol','name','名稱','股票']);
-    const colCode = pickColumn(headers, ['stock_code','股票代碼','代碼','code']);
-    const colVal = pickColumn(headers, valueCandidatesByHorizon(horizon));
-    const colChg = pickColumn(headers, changeCandidatesByHorizon(horizon));
-
-    if (!colVal || !colChg) throw new Error('找不到對應期間的數據欄位');
-
-    return rawRows.map(r => {
-      const symbol = String(r[colSymbol] || '').trim();
-      const code = String(r[colCode] || '').trim();
+    return raw.map(r => {
+      const symbol = String(r[colS] || '').trim();
+      const code = String(r[colC] || '').trim();
       if (!symbol || !code) return null;
       return {
-        group: String(r[colGroup] || '未分類').trim(),
-        sub: mode === 'subcol' ? String(r[colSub] || '未分類').trim() : '',
+        group: String(r[colG] || '未分類').trim(),
+        sub: mode === 'subcol' ? String(r[colSub] || '其他').trim() : '',
         symbol, code,
-        value: toNumber(r[colVal]) || 1,
+        value: toNumber(r[colV]) || 1,
         change: toNumber(r[colChg]) || 0
       };
     }).filter(Boolean);
   }
 
-  function buildTreemap(rows, mode) {
-    const ids = [], labels = [], parents = [], values = [], colors = [], customdata = [];
-    ids.push('root'); labels.push('全部'); parents.push(''); values.push(0); colors.push(0); customdata.push('');
-
-    const gMap = new Map();
-    const sMap = new Map();
-
-    rows.forEach(r => {
-      if(!gMap.has(r.group)) gMap.set(r.group, []);
-      gMap.get(r.group).push(r);
-      if(mode !== 'none') {
-        const k = `${r.group}||${r.sub}`;
-        if(!sMap.has(k)) sMap.set(k, []);
-        sMap.get(k).push(r);
-      }
-    });
-
-    gMap.forEach((mems, gname) => {
-      const v = mems.reduce((s, x) => s + x.value, 0);
-      const c = mems.reduce((s, x) => s + (x.change * x.value), 0) / v;
-      ids.push(`g|${gname}`); labels.push(gname); parents.push('root');
-      values.push(v); colors.push(c); customdata.push(formatTop10(mems));
-    });
-
-    if(mode !== 'none') {
-      sMap.forEach((mems, key) => {
-        const [g, s] = key.split('||');
-        const v = mems.reduce((s, x) => s + x.value, 0);
-        const c = mems.reduce((s, x) => s + (x.change * x.value), 0) / v;
-        ids.push(`s|${g}|${s}`); labels.push(s); parents.push(`g|${g}`);
-        values.push(v); colors.push(c); customdata.push(formatTop10(mems));
-      });
-    }
-
-    rows.forEach(r => {
-      const pid = mode === 'none' ? `g|${r.group}` : `s|${r.group}|${r.sub}`;
-      ids.push(`l|${r.symbol}`); labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
-      parents.push(pid); values.push(r.value); colors.push(r.change);
-      customdata.push(r.code);
-    });
-
-    values[0] = rows.reduce((s, x) => s + x.value, 0);
-    return { ids, labels, parents, values, colors, customdata };
-  }
-
-  function render(rawRows) {
+  // 繪製熱力圖
+  function draw(raw) {
     try {
-      const tree = buildTreemap(normalizeRows(rawRows, $mode.value, $horizon.value), $mode.value);
+      const mode = document.getElementById('mode').value;
+      const horizon = document.getElementById('horizon').value;
+      const rows = normalize(raw, mode, horizon);
+      
+      const ids=[], labels=[], parents=[], values=[], colors=[], customs=[];
+      
+      // Root
+      ids.push('root'); labels.push('市場'); parents.push(''); values.push(0); colors.push(0); customs.push('');
+
+      const groups = {};
+      rows.forEach(r => {
+        if (!groups[r.group]) groups[r.group] = { mems:[], subs:{} };
+        groups[r.group].mems.push(r);
+        if (mode === 'subcol') {
+          if (!groups[r.group].subs[r.sub]) groups[r.group].subs[r.sub] = [];
+          groups[r.group].subs[r.sub].push(r);
+        }
+      });
+
+      Object.entries(groups).forEach(([gName, gData]) => {
+        const gId = `g|${gName}`;
+        const gVal = gData.mems.reduce((s,x)=>s+x.value, 0);
+        const gAvg = gData.mems.reduce((s,x)=>s+(x.change*x.value),0) / gVal;
+        
+        ids.push(gId); labels.push(gName); parents.push('root');
+        values.push(gVal); colors.push(gAvg); customs.push(getTop10Text(gData.mems));
+
+        if (mode === 'subcol') {
+          Object.entries(gData.subs).forEach(([sName, sMems]) => {
+            const sId = `s|${gName}|${sName}`;
+            const sVal = sMems.reduce((s,x)=>s+x.value, 0);
+            const sAvg = sMems.reduce((s,x)=>s+(x.change*x.value),0) / sVal;
+            ids.push(sId); labels.push(sName); parents.push(gId);
+            values.push(sVal); colors.push(sAvg); customs.push(getTop10Text(sMems));
+          });
+        }
+      });
+
+      rows.forEach(r => {
+        const pId = mode === 'subcol' ? `s|${r.group}|${r.sub}` : `g|${r.group}`;
+        ids.push(`l|${r.code}`); 
+        labels.push(`${r.symbol}<br>${fmtP(r.change)}`);
+        parents.push(pId); values.push(r.value); colors.push(r.change); customs.push(r.code);
+      });
+
+      values[0] = rows.reduce((s,x)=>s+x.value, 0);
+
       const data = [{
         type: 'treemap',
-        ids: tree.ids, labels: tree.labels, parents: tree.parents, values: tree.values, customdata: tree.customdata,
-        branchvalues: 'total', textinfo: 'label',
-        marker: { colors: tree.colors, colorscale: [[0,'#1a9641'], [0.5,'#f3f4f6'], [1,'#d7191c']], cmid: 0 },
-        hovertemplate: "%{id[0] === 'l' ? '<b>%{label}</b>' : '%{customdata}'}<extra></extra>"
+        ids, labels, parents, values, customdata: customs,
+        branchvalues: 'total',
+        marker: { colors, colorscale: [[0,'#1a9641'],[0.5,'#f3f4f6'],[1,'#d7191c']], cmid:0 },
+        hovertemplate: "%{id[0]==='l' ? '<b>%{label}</b>' : '%{customdata}'}<extra></extra>"
       }];
-      Plotly.newPlot('chart', data, { margin: { l:10, r:10, t:30, b:10 } }, { responsive:true, displaylogo:false })
-        .then(() => {
-          document.getElementById('chart').on('plotly_treemapclick', (e) => {
-            const pt = e.points[0];
-            if (!pt.id.startsWith('l|')) return;
-            window.location.href = `https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${encodeURIComponent(pt.customdata)}`;
-            return false;
-          });
-        });
-      setMsg('渲染成功', true);
+
+      Plotly.newPlot($chart, data, {margin:{l:5,r:5,t:25,b:5}}, {responsive:true, displaylogo:false});
+      $chart.on('plotly_treemapclick', e => {
+        const id = e.points[0].id;
+        if (id.startsWith('l|')) {
+          const code = e.points[0].customdata;
+          window.open(`https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${code}`, '_blank');
+        }
+        return false;
+      });
+      setMsg("更新成功", true);
     } catch (e) { setMsg(e.message); }
   }
 
-  // 功能實作：載入、拖曳、分享
-  async function handleFile(file) {
-    const buf = await file.arrayBuffer();
-    const name = file.name.toLowerCase();
-    if (name.endsWith('.csv')) {
-      lastRawRows = Papa.parse(new TextDecoder().decode(buf), {header:true, skipEmptyLines:true}).data;
-    } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-      const wb = XLSX.read(buf, {type:'array'});
-      lastRawRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-    } else if (name.endsWith('.json')) {
-      lastRawRows = JSON.parse(new TextDecoder().decode(buf));
+  // 檔案與 API
+  async function loadFile(f) {
+    setMsg("讀取中...");
+    const name = f.name.toLowerCase();
+    const reader = new FileReader();
+    reader.onload = e => {
+      let data;
+      if (name.endsWith('.csv')) data = Papa.parse(e.target.result, {header:true, skipEmptyLines:true}).data;
+      else if (name.endsWith('.json')) data = JSON.parse(e.target.result);
+      else {
+        const wb = XLSX.read(e.target.result, {type:'binary'});
+        data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      }
+      lastRawRows = data; draw(data);
+    };
+    if (name.endsWith('.xlsx') || name.endsWith('.xls')) reader.readAsBinaryString(f);
+    else reader.readAsText(f, "UTF-8");
+  }
+
+  // 事件監聽
+  document.getElementById('file').onchange = e => e.target.files[0] && loadFile(e.target.files[0]);
+  document.getElementById('btnLoadDefault').onclick = () => {
+    fetch('./data.csv', {cache:'no-store'}).then(r => r.text()).then(t => {
+      lastRawRows = Papa.parse(t, {header:true, skipEmptyLines:true}).data;
+      draw(lastRawRows);
+    }).catch(() => setMsg("找不到 data.csv"));
+  };
+  document.getElementById('mode').onchange = () => lastRawRows && draw(lastRawRows);
+  document.getElementById('horizon').onchange = () => lastRawRows && draw(lastRawRows);
+  document.getElementById('btnShare').onclick = () => {
+    if (!lastRawRows) return;
+    const s = LZString.compressToEncodedURIComponent(JSON.stringify({r:lastRawRows, h:document.getElementById('horizon').value}));
+    location.hash = "data=" + s;
+    document.getElementById('btnCopy').disabled = false;
+    setMsg("網址已更新，可複製分享", true);
+  };
+  document.getElementById('btnCopy').onclick = () => {
+    navigator.clipboard.writeText(location.href);
+    setMsg("已複製到剪貼簿", true);
+  };
+
+  // 初始化時間與 Hash
+  setInterval(() => {
+    document.getElementById('clockNow').textContent = new Date().toLocaleTimeString('zh-Hant-TW', {hour12:false});
+  }, 1000);
+
+  window.onload = () => {
+    if (location.hash.startsWith('#data=')) {
+      try {
+        const p = JSON.parse(LZString.decompressFromEncodedURIComponent(location.hash.slice(6)));
+        lastRawRows = p.r; document.getElementById('horizon').value = p.h;
+        draw(lastRawRows);
+      } catch(e) { setMsg("連結解析失敗"); }
+    } else {
+      document.getElementById('btnLoadDefault').click();
     }
-    render(lastRawRows);
-  }
-
-  $file.addEventListener('change', e => e.target.files[0] && handleFile(e.target.files[0]));
-  $btnLoadDefault.addEventListener('click', () => fetch('./data.csv').then(r => r.text()).then(t => { lastRawRows = Papa.parse(t, {header:true}).data; render(lastRawRows); }));
-  $mode.addEventListener('change', () => lastRawRows && render(lastRawRows));
-  $horizon.addEventListener('change', () => lastRawRows && render(lastRawRows));
-  $btnShare.addEventListener('click', () => {
-    const compressed = LZString.compressToEncodedURIComponent(JSON.stringify({v:5, mode:$mode.value, horizon:$horizon.value, rawRows:lastRawRows}));
-    location.hash = `data=${compressed}`;
-    $btnCopy.disabled = false;
-    setMsg('連結已生成', true);
-  });
-  $btnCopy.addEventListener('click', () => navigator.clipboard.writeText(location.href).then(() => setMsg('已複製', true)));
-
-  // 初始化
-  startClockNow(); showDataUpdatedAt();
-  const hash = location.hash;
-  if (hash.startsWith('#data=')) {
-    const payload = JSON.parse(LZString.decompressFromEncodedURIComponent(hash.slice(6)));
-    $mode.value = payload.mode; $horizon.value = payload.horizon; lastRawRows = payload.rawRows;
-    render(lastRawRows);
-  } else {
-    $btnLoadDefault.click();
-  }
+  };
 </script>
 </body>
 </html>
