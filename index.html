@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>股票熱力圖（成分股預覽版）</title>
+  <title>股票熱力圖（完整功能 + 成分股預覽）</title>
 
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -19,22 +19,11 @@
     .bar { display:flex; gap:10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; }
     button { padding: 8px 10px; border: 1px solid var(--border); background: #fff; border-radius: 10px; cursor:pointer; }
     button:hover { background:#f9fafb; }
-    input[type="file"] { padding: 6px 0; }
-    input[type="text"], select {
-      padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
-      min-width: 220px; background:#fff;
-    }
+    input[type="text"], select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; min-width: 220px; }
     #msg { padding: 0 16px 10px; color: #b91c1c; font-size: 13px; min-height: 18px; white-space: pre-wrap; }
     #chart { height: calc(100vh - 200px); }
     .ok { color: #047857 !important; }
-    .drop {
-      margin: 10px 16px 0;
-      border: 2px dashed var(--border);
-      border-radius: 14px;
-      padding: 10px 12px;
-      color: var(--muted);
-      font-size: 13px;
-    }
+    .drop { margin: 10px 16px 0; border: 2px dashed var(--border); border-radius: 14px; padding: 10px 12px; color: var(--muted); font-size: 13px; }
     .pill { font-size:12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
     .timebar { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; align-items:center; }
   </style>
@@ -42,9 +31,9 @@
 
 <body>
   <header>
-    <h1>股票熱力圖（滑鼠移至類股可預覽成分股）</h1>
+    <h1>股票熱力圖（移至類股預覽成分股）</h1>
     <div class="muted">
-      預設讀取 <b>data.csv</b>。提示：類股節點現在會顯示成交量前 10 大的成分股預覽。
+      支援 CSV/XLSX/JSON。滑鼠移至類股區塊可查看前 10 大權重股。
       <div class="timebar">
         <span id="clockNow" class="pill">現在時間：--</span>
         <span id="dataUpdated" class="pill">資料更新：--</span>
@@ -55,6 +44,7 @@
   <div class="bar">
     <input id="file" type="file" accept=".csv,.xlsx,.xls,.json" />
     <button id="btnLoadDefault">載入 data.csv</button>
+
     <select id="horizon">
       <option value="1d" selected>近1日</option>
       <option value="5d">近5日</option>
@@ -63,18 +53,20 @@
       <option value="1y">近一年</option>
       <option value="ytd">YTD</option>
     </select>
+
     <select id="mode">
       <option value="none">單層：類股 → 股票</option>
       <option value="subcol">雙層：類股 → 子分類 → 股票</option>
       <option value="amountbin">雙層：類股 → 成交額分級 → 股票</option>
     </select>
+
     <button id="btnShare">產生連結</button>
     <button id="btnCopy" disabled>複製連結</button>
-    <input id="csvUrl" type="text" placeholder="CSV 公開網址" />
-    <button id="btnLoadUrl">載入網址</button>
+    <input id="csvUrl" type="text" placeholder="貼上 CSV 網址" />
+    <button id="btnLoadUrl">從網址載入</button>
   </div>
 
-  <div class="drop">📥 拖曳檔案至此處直接載入。</div>
+  <div class="drop">📥 拖曳檔案至此處載入。</div>
   <div id="msg"></div>
   <div id="chart"></div>
 
@@ -96,10 +88,12 @@
     $msg.className = ok ? 'ok' : '';
   }
 
+  // 時間與 GitHub 更新時間功能
   function startClockNow() {
     const el = document.getElementById('clockNow');
     const fmt = new Intl.DateTimeFormat('zh-Hant-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false, timeZone:'Asia/Taipei' });
-    setInterval(() => { if(el) el.textContent = `現在時間：${fmt.format(new Date())}`; }, 1000);
+    const tick = () => { if(el) el.textContent = `現在時間：${fmt.format(new Date())}`; };
+    tick(); setInterval(tick, 1000);
   }
 
   async function showDataUpdatedAt() {
@@ -107,20 +101,21 @@
     try {
       const res = await fetch(`https://api.github.com/repos/twfcinv-svg/stock-heatmap1229/commits?path=data.csv&per_page=1`, { cache: 'no-store' });
       const arr = await res.json();
-      const d = new Date(arr[0].commit.committer.date);
+      const d = new Date(arr?.[0]?.commit?.committer?.date);
       if(el) el.textContent = `資料更新：${d.toLocaleString('zh-Hant-TW', { timeZone:'Asia/Taipei', hour12:false })}`;
-    } catch (e) { if(el) el.textContent = `資料更新：未知`; }
+    } catch (e) { if(el) el.textContent = `資料更新：讀取失敗`; }
   }
 
+  // 數值處理工具
   function toNumber(x) {
-    const s = String(x || '').trim().replace(/,/g,'').replace(/%/g,'');
+    if (x === null || x === undefined) return NaN;
+    const s = String(x).trim().replace(/,/g,'').replace(/%/g,'');
     const n = Number(s);
     return Number.isFinite(n) ? n : NaN;
   }
 
   function fmtPct(x) {
     const n = Number(x);
-    if (!Number.isFinite(n)) return '0.0%';
     return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
   }
 
@@ -133,172 +128,157 @@
     return null;
   }
 
+  // 欄位候選清單
   function changeCandidatesByHorizon(h) {
     const common = ['change','chg','漲跌幅','報酬'];
-    const map = { '1d':['1d','近1日',...common], '5d':['5d','近5日',...common], '20d':['20d','月',...common], '60d':['60d','三月',...common], '1y':['1y','一年',...common], 'ytd':['ytd','今年以來',...common] };
+    const map = { '1d':['chg_1d','1d',...common], '5d':['chg_5d','5d',...common], '20d':['chg_20d','20d','月',...common], '60d':['chg_60d','60d',...common], '1y':['chg_1y','1y',...common], 'ytd':['ytd',...common] };
     return map[h] || map['1d'];
   }
 
   function valueCandidatesByHorizon(h) {
-    const map = { '1d':['amt_1d','成交額'], '5d':['amt_5d','5日成交額'], '20d':['amt_20d','20日成交額'], '60d':['amt_60d','60日成交額'], '1y':['amt_1y','一年成交額'], 'ytd':['amt_ytd','今年成交額'] };
+    const map = { '1d':['amt_1d','amount_1d','成交額'], '5d':['amt_5d','5d成交額'], '20d':['amt_20d','20d成交額'], '60d':['amt_60d'], '1y':['amt_1y'], 'ytd':['amt_ytd'] };
     return map[h] || map['1d'];
   }
 
-  /**
-   * 格式化前 10 檔成分股為 HTML 字串，用於 Hover 顯示
-   */
+  // 生成成分股清單文字
   function formatTop10(stockList) {
-    // 依成交量排序，取前 10 名
-    const top10 = stockList
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
-    
-    let str = "<b>前 10 大成分股：</b><br>";
-    top10.forEach((s, idx) => {
-      str += `${idx + 1}. ${s.symbol}: ${fmtPct(s.change)}<br>`;
-    });
+    const top10 = stockList.sort((a, b) => b.value - a.value).slice(0, 10);
+    let str = "<b>成交額前 10 名：</b><br>";
+    top10.forEach((s, i) => { str += `${i+1}. ${s.symbol} (${fmtPct(s.change)})<br>`; });
     return str;
   }
 
   function normalizeRows(rawRows, mode, horizon) {
-    const headers = Object.keys(rawRows[0] || {});
-    const colGroup = pickColumn(headers, ['group','產業','類股']);
-    const colSub = pickColumn(headers, ['sub','子分類']);
-    const colSymbol = pickColumn(headers, ['symbol','名稱','股票']);
-    const colCode = pickColumn(headers, ['stock_code','代碼']);
-    const colValue = pickColumn(headers, valueCandidatesByHorizon(horizon));
-    const colChange = pickColumn(headers, changeCandidatesByHorizon(horizon));
+    if (!rawRows || rawRows.length === 0) throw new Error('資料為空');
+    const headers = Object.keys(rawRows[0]);
+    const colGroup = pickColumn(headers, ['group','產業','類別','類股']);
+    const colSub = pickColumn(headers, ['sub','子分類','次產業']);
+    const colSymbol = pickColumn(headers, ['symbol','name','名稱','股票']);
+    const colCode = pickColumn(headers, ['stock_code','股票代碼','代碼','code']);
+    const colVal = pickColumn(headers, valueCandidatesByHorizon(horizon));
+    const colChg = pickColumn(headers, changeCandidatesByHorizon(horizon));
 
-    let rows = rawRows.map(r => {
+    if (!colVal || !colChg) throw new Error('找不到對應期間的數據欄位');
+
+    return rawRows.map(r => {
       const symbol = String(r[colSymbol] || '').trim();
       const code = String(r[colCode] || '').trim();
-      const val = toNumber(r[colValue]);
       if (!symbol || !code) return null;
       return {
         group: String(r[colGroup] || '未分類').trim(),
         sub: mode === 'subcol' ? String(r[colSub] || '未分類').trim() : '',
         symbol, code,
-        value: val > 0 ? val : 1,
-        change: toNumber(r[colChange]) || 0
+        value: toNumber(r[colVal]) || 1,
+        change: toNumber(r[colChg]) || 0
       };
     }).filter(Boolean);
-
-    if (mode === 'amountbin') {
-      // 分級邏輯略... (保持原樣)
-    }
-    return rows;
   }
 
   function buildTreemap(rows, mode) {
     const ids = [], labels = [], parents = [], values = [], colors = [], customdata = [];
     ids.push('root'); labels.push('全部'); parents.push(''); values.push(0); colors.push(0); customdata.push('');
 
-    const groupMap = new Map(); // 存放各類股的成員
-    const subMap = new Map();   // 存放子分類的成員
+    const gMap = new Map();
+    const sMap = new Map();
 
     rows.forEach(r => {
-      if (!groupMap.has(r.group)) groupMap.set(r.group, []);
-      groupMap.get(r.group).push(r);
-
-      if (mode !== 'none') {
-        const key = `${r.group}||${r.sub}`;
-        if (!subMap.has(key)) subMap.set(key, []);
-        subMap.get(key).push(r);
+      if(!gMap.has(r.group)) gMap.set(r.group, []);
+      gMap.get(r.group).push(r);
+      if(mode !== 'none') {
+        const k = `${r.group}||${r.sub}`;
+        if(!sMap.has(k)) sMap.set(k, []);
+        sMap.get(k).push(r);
       }
     });
 
-    // 建立類股層級
-    for (const [gname, members] of groupMap.entries()) {
-      const totalVal = members.reduce((s, x) => s + x.value, 0);
-      const avgChg = members.reduce((s, x) => s + (x.change * x.value), 0) / totalVal;
-      ids.push(`g|${gname}`);
-      labels.push(gname);
-      parents.push('root');
-      values.push(totalVal);
-      colors.push(avgChg);
-      // ★ 關鍵修改：將前 10 檔文字塞入 customdata
-      customdata.push(formatTop10(members));
+    gMap.forEach((mems, gname) => {
+      const v = mems.reduce((s, x) => s + x.value, 0);
+      const c = mems.reduce((s, x) => s + (x.change * x.value), 0) / v;
+      ids.push(`g|${gname}`); labels.push(gname); parents.push('root');
+      values.push(v); colors.push(c); customdata.push(formatTop10(mems));
+    });
+
+    if(mode !== 'none') {
+      sMap.forEach((mems, key) => {
+        const [g, s] = key.split('||');
+        const v = mems.reduce((s, x) => s + x.value, 0);
+        const c = mems.reduce((s, x) => s + (x.change * x.value), 0) / v;
+        ids.push(`s|${g}|${s}`); labels.push(s); parents.push(`g|${g}`);
+        values.push(v); colors.push(c); customdata.push(formatTop10(mems));
+      });
     }
 
-    // 建立子分類層級
-    if (mode !== 'none') {
-      for (const [key, members] of subMap.entries()) {
-        const [gname, sname] = key.split('||');
-        const totalVal = members.reduce((s, x) => s + x.value, 0);
-        const avgChg = members.reduce((s, x) => s + (x.change * x.value), 0) / totalVal;
-        ids.push(`s|${gname}|${sname}`);
-        labels.push(sname);
-        parents.push(`g|${gname}`);
-        values.push(totalVal);
-        colors.push(avgChg);
-        // ★ 關鍵修改
-        customdata.push(formatTop10(members));
-      }
-    }
-
-    // 建立股票層級
     rows.forEach(r => {
-      const pid = (mode === 'none') ? `g|${r.group}` : `s|${r.group}|${r.sub}`;
-      ids.push(`l|${r.group}|${r.sub}|${r.symbol}`);
-      labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
-      parents.push(pid);
-      values.push(r.value);
-      colors.push(r.change);
-      // 股票層級顯示代碼，點擊用
+      const pid = mode === 'none' ? `g|${r.group}` : `s|${r.group}|${r.sub}`;
+      ids.push(`l|${r.symbol}`); labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
+      parents.push(pid); values.push(r.value); colors.push(r.change);
       customdata.push(r.code);
     });
 
     values[0] = rows.reduce((s, x) => s + x.value, 0);
-    return {ids, labels, parents, values, colors, customdata};
+    return { ids, labels, parents, values, colors, customdata };
   }
 
   function render(rawRows) {
-    const rows = normalizeRows(rawRows, $mode.value, $horizon.value);
-    const tree = buildTreemap(rows, $mode.value);
-
-    const data = [{
-      type: 'treemap',
-      ids: tree.ids,
-      labels: tree.labels,
-      parents: tree.parents,
-      values: tree.values,
-      customdata: tree.customdata,
-      branchvalues: 'total',
-      textinfo: 'label',
-      marker: { colors: tree.colors, colorscale: [[0,'#1a9641'], [0.5,'#f3f4f6'], [1,'#d7191c']], cmid: 0 },
-      // ★ 修改 HoverTemplate
-      // %{customdata} 會抓取我們剛才塞進去的前 10 檔列表
-      // 如果 id 開頭是 'l|' (股票)，我們改用簡短顯示，否則顯示成分股預覽
-      hovertemplate: "%{id[0] === 'l' ? '股票：<b>%{label}</b>' : '%{customdata}'}<extra></extra>"
-    }];
-
-    Plotly.newPlot('chart', data, { margin: { l:10, r:10, t:30, b:10 } }, { responsive:true, displaylogo:false })
-      .then(() => {
-        document.getElementById('chart').on('plotly_treemapclick', (e) => {
-          const pt = e.points[0];
-          if (!pt.id.startsWith('l|')) return;
-          window.location.href = `https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${encodeURIComponent(pt.customdata)}`;
-          return false;
+    try {
+      const tree = buildTreemap(normalizeRows(rawRows, $mode.value, $horizon.value), $mode.value);
+      const data = [{
+        type: 'treemap',
+        ids: tree.ids, labels: tree.labels, parents: tree.parents, values: tree.values, customdata: tree.customdata,
+        branchvalues: 'total', textinfo: 'label',
+        marker: { colors: tree.colors, colorscale: [[0,'#1a9641'], [0.5,'#f3f4f6'], [1,'#d7191c']], cmid: 0 },
+        hovertemplate: "%{id[0] === 'l' ? '<b>%{label}</b>' : '%{customdata}'}<extra></extra>"
+      }];
+      Plotly.newPlot('chart', data, { margin: { l:10, r:10, t:30, b:10 } }, { responsive:true, displaylogo:false })
+        .then(() => {
+          document.getElementById('chart').on('plotly_treemapclick', (e) => {
+            const pt = e.points[0];
+            if (!pt.id.startsWith('l|')) return;
+            window.location.href = `https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${encodeURIComponent(pt.customdata)}`;
+            return false;
+          });
         });
-      });
-    setMsg('圖表已更新', true);
+      setMsg('渲染成功', true);
+    } catch (e) { setMsg(e.message); }
   }
 
-  // 事件綁定略... (與原版相同)
+  // 功能實作：載入、拖曳、分享
+  async function handleFile(file) {
+    const buf = await file.arrayBuffer();
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.csv')) {
+      lastRawRows = Papa.parse(new TextDecoder().decode(buf), {header:true, skipEmptyLines:true}).data;
+    } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      const wb = XLSX.read(buf, {type:'array'});
+      lastRawRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    } else if (name.endsWith('.json')) {
+      lastRawRows = JSON.parse(new TextDecoder().decode(buf));
+    }
+    render(lastRawRows);
+  }
+
   $file.addEventListener('change', e => e.target.files[0] && handleFile(e.target.files[0]));
   $btnLoadDefault.addEventListener('click', () => fetch('./data.csv').then(r => r.text()).then(t => { lastRawRows = Papa.parse(t, {header:true}).data; render(lastRawRows); }));
   $mode.addEventListener('change', () => lastRawRows && render(lastRawRows));
   $horizon.addEventListener('change', () => lastRawRows && render(lastRawRows));
+  $btnShare.addEventListener('click', () => {
+    const compressed = LZString.compressToEncodedURIComponent(JSON.stringify({v:5, mode:$mode.value, horizon:$horizon.value, rawRows:lastRawRows}));
+    location.hash = `data=${compressed}`;
+    $btnCopy.disabled = false;
+    setMsg('連結已生成', true);
+  });
+  $btnCopy.addEventListener('click', () => navigator.clipboard.writeText(location.href).then(() => setMsg('已複製', true)));
 
-  async function handleFile(file) {
-    const buf = await file.arrayBuffer();
-    const text = new TextDecoder().decode(buf);
-    lastRawRows = Papa.parse(text, {header:true}).data;
+  // 初始化
+  startClockNow(); showDataUpdatedAt();
+  const hash = location.hash;
+  if (hash.startsWith('#data=')) {
+    const payload = JSON.parse(LZString.decompressFromEncodedURIComponent(hash.slice(6)));
+    $mode.value = payload.mode; $horizon.value = payload.horizon; lastRawRows = payload.rawRows;
     render(lastRawRows);
+  } else {
+    $btnLoadDefault.click();
   }
-
-  startClockNow();
-  showDataUpdatedAt();
 </script>
 </body>
 </html>
