@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>股票熱力圖 - 成分股預覽版</title>
+  <title>股票熱力圖 - 穩定修復版</title>
 
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -12,21 +12,21 @@
 
   <style>
     :root { --border:#e5e7eb; --muted:#6b7280; }
-    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; overflow-x: hidden; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; overflow-x: hidden; background: #fdfdfd; }
     header { padding: 14px 16px; border-bottom: 1px solid var(--border); background: #fff; }
     h1 { margin: 0; font-size: 18px; }
     .muted { color: var(--muted); font-size: 13px; margin-top: 6px; }
-    .bar { display:flex; gap:10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; background: #fdfdfd; }
-    button { padding: 8px 12px; border: 1px solid var(--border); background: #fff; border-radius: 8px; cursor:pointer; font-size: 13px; }
-    button:hover { background:#f9fafb; }
+    .bar { display:flex; gap:10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; background: #fff; }
+    button { padding: 8px 12px; border: 1px solid var(--border); background: #fff; border-radius: 8px; cursor:pointer; font-size: 13px; transition: 0.2s; }
+    button:hover { background:#f9fafb; border-color: #9ca3af; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     select, input[type="text"] { padding: 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
-    #msg { padding: 10px 16px; color: #b91c1c; font-size: 13px; min-height: 20px; }
+    #msg { padding: 10px 16px; color: #b91c1c; font-size: 13px; min-height: 20px; font-weight: 500; }
     #chart { height: calc(100vh - 220px); width: 100%; }
     .ok { color: #047857 !important; }
-    .drop { margin: 10px 16px; border: 2px dashed var(--border); border-radius: 12px; padding: 12px; color: var(--muted); font-size: 12px; text-align: center; }
     .pill { font-size:11px; padding:2px 8px; border:1px solid var(--border); border-radius:12px; color:var(--muted); background: #f3f4f6; }
     .timebar { margin-top: 6px; display:flex; gap:8px; }
+    .drop-hint { margin: 10px 16px; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; text-align: center; color: var(--muted); font-size: 12px; }
   </style>
 </head>
 
@@ -34,7 +34,7 @@
   <header>
     <h1>股票熱力圖 (Stock Heatmap)</h1>
     <div class="muted">
-      移至類股區塊可查看前 10 大成分股。點擊個別股票跳轉 K 線圖。
+      滑鼠移至類股可預覽 Top 10 成分股。點擊股票可查看 K 線圖。
       <div class="timebar">
         <span id="clockNow" class="pill">--:--:--</span>
         <span id="dataUpdated" class="pill">更新時間：載入中...</span>
@@ -49,6 +49,7 @@
       <option value="1d">近1日</option>
       <option value="5d">近5日</option>
       <option value="20d">近20日</option>
+      <option value="60d">近60日</option>
       <option value="ytd">今年以來</option>
     </select>
     <select id="mode">
@@ -57,13 +58,13 @@
     </select>
     <button id="btnShare">分享</button>
     <button id="btnCopy" disabled>複製網址</button>
-    <input id="csvUrl" type="text" placeholder="貼上 CSV 連結" style="flex-grow:1; min-width:150px;" />
+    <input id="csvUrl" type="text" placeholder="CSV 網址" style="flex-grow:1; min-width:150px;" />
     <button id="btnLoadUrl">載入</button>
   </div>
 
   <div id="msg"></div>
   <div id="chart"></div>
-  <div class="drop">💡 提示：可直接拖曳 CSV/XLSX 檔案到視窗內</div>
+  <div class="drop-hint">提示：支援拖曳 CSV / XLSX 檔案進來載入</div>
 
 <script>
   const $msg = document.getElementById('msg');
@@ -75,25 +76,24 @@
     $msg.className = isOk ? 'ok' : '';
   }
 
-  // 工具：數值與格式化
   const toNumber = v => {
     if (v === null || v === undefined) return NaN;
     const n = Number(String(v).replace(/[,%]/g, ''));
     return isFinite(n) ? n : NaN;
   };
+  
   const fmtP = v => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
 
-  // 核心：解析前 10 檔
+  // 生成成分股清單文字
   function getTop10Text(mems) {
     const top = [...mems].sort((a,b) => b.value - a.value).slice(0, 10);
-    return "<b>成交金額 Top 10：</b><br>" + top.map((s,i) => `${i+1}. ${s.symbol} (${fmtP(s.change)})`).join('<br>');
+    return "<b>成交金額前 10 名：</b><br>" + top.map((s,i) => `${i+1}. ${s.symbol} (${fmtP(s.change)})`).join('<br>');
   }
 
-  // 資料標準化
   function normalize(raw, mode, horizon) {
     if (!raw || !raw.length) throw new Error("無效資料");
     const h = Object.keys(raw[0]);
-    const find = (arr) => {
+    const findCol = (arr) => {
       for (let k of arr) {
         let found = h.find(key => key.toLowerCase().includes(k.toLowerCase()));
         if (found) return found;
@@ -101,16 +101,14 @@
       return null;
     };
 
-    const colG = find(['group','產業','類股','category']);
-    const colS = find(['symbol','name','股票','名稱']);
-    const colC = find(['code','stock','代碼','ticker']);
-    const colSub = find(['sub','子分類','次產業']);
-    
-    // 期間欄位對應
-    const colV = find(['amt_'+horizon, 'amount_'+horizon, '成交額']);
-    const colChg = find(['chg_'+horizon, 'change_'+horizon, horizon, '漲跌']);
+    const colG = findCol(['group','產業','類股']);
+    const colS = findCol(['symbol','name','股票','名稱']);
+    const colC = findCol(['code','stock','代碼']);
+    const colSub = findCol(['sub','子分類','次產業']);
+    const colV = findCol(['amt_'+horizon, 'amount_'+horizon, '成交額']);
+    const colChg = findCol(['chg_'+horizon, 'change_'+horizon, horizon, '漲跌']);
 
-    if (!colV || !colChg) throw new Error(`找不到 ${horizon} 相關欄位`);
+    if (!colV || !colChg) throw new Error(`找不到關鍵數據欄位，請檢查檔案內容`);
 
     return raw.map(r => {
       const symbol = String(r[colS] || '').trim();
@@ -126,7 +124,6 @@
     }).filter(Boolean);
   }
 
-  // 繪製熱力圖
   function draw(raw) {
     try {
       const mode = document.getElementById('mode').value;
@@ -135,8 +132,8 @@
       
       const ids=[], labels=[], parents=[], values=[], colors=[], customs=[];
       
-      // Root
-      ids.push('root'); labels.push('市場'); parents.push(''); values.push(0); colors.push(0); customs.push('');
+      // Root 節點
+      ids.push('root'); labels.push('全部'); parents.push(''); values.push(0); colors.push(0); customs.push('市場總覽');
 
       const groups = {};
       rows.forEach(r => {
@@ -148,13 +145,15 @@
         }
       });
 
+      // 類股層級處理
       Object.entries(groups).forEach(([gName, gData]) => {
         const gId = `g|${gName}`;
         const gVal = gData.mems.reduce((s,x)=>s+x.value, 0);
         const gAvg = gData.mems.reduce((s,x)=>s+(x.change*x.value),0) / gVal;
         
         ids.push(gId); labels.push(gName); parents.push('root');
-        values.push(gVal); colors.push(gAvg); customs.push(getTop10Text(gData.mems));
+        values.push(gVal); colors.push(gAvg); 
+        customs.push(`<b>${gName}</b><br>${getTop10Text(gData.mems)}`);
 
         if (mode === 'subcol') {
           Object.entries(gData.subs).forEach(([sName, sMems]) => {
@@ -162,61 +161,68 @@
             const sVal = sMems.reduce((s,x)=>s+x.value, 0);
             const sAvg = sMems.reduce((s,x)=>s+(x.change*x.value),0) / sVal;
             ids.push(sId); labels.push(sName); parents.push(gId);
-            values.push(sVal); colors.push(sAvg); customs.push(getTop10Text(sMems));
+            values.push(sVal); colors.push(sAvg);
+            customs.push(`<b>${sName}</b><br>${getTop10Text(sMems)}`);
           });
         }
       });
 
+      // 股票層級處理
       rows.forEach(r => {
         const pId = mode === 'subcol' ? `s|${r.group}|${r.sub}` : `g|${r.group}`;
         ids.push(`l|${r.code}`); 
         labels.push(`${r.symbol}<br>${fmtP(r.change)}`);
-        parents.push(pId); values.push(r.value); colors.push(r.change); customs.push(r.code);
+        parents.push(pId); values.push(r.value); colors.push(r.change);
+        customs.push(`<b>${r.symbol} (${r.code})</b><br>漲跌幅: ${fmtP(r.change)}`);
       });
 
       values[0] = rows.reduce((s,x)=>s+x.value, 0);
 
       const data = [{
         type: 'treemap',
-        ids, labels, parents, values, customdata: customs,
+        ids, labels, parents, values, 
+        customdata: customs,
         branchvalues: 'total',
         marker: { colors, colorscale: [[0,'#1a9641'],[0.5,'#f3f4f6'],[1,'#d7191c']], cmid:0 },
-        hovertemplate: "%{id[0]==='l' ? '<b>%{label}</b>' : '%{customdata}'}<extra></extra>"
+        // 關鍵修復：這裡直接讀取預先處理好的 customdata，不再放複雜邏輯
+        hovertemplate: "%{customdata}<extra></extra>"
       }];
 
       Plotly.newPlot($chart, data, {margin:{l:5,r:5,t:25,b:5}}, {responsive:true, displaylogo:false});
+      
       $chart.on('plotly_treemapclick', e => {
         const id = e.points[0].id;
-        if (id.startsWith('l|')) {
-          const code = e.points[0].customdata;
+        if (id && id.startsWith('l|')) {
+          const code = id.split('|')[1];
           window.open(`https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${code}`, '_blank');
         }
         return false;
       });
-      setMsg("更新成功", true);
+      setMsg("更新完成", true);
     } catch (e) { setMsg(e.message); }
   }
 
-  // 檔案與 API
+  // 檔案與 API 載入
   async function loadFile(f) {
-    setMsg("讀取中...");
     const name = f.name.toLowerCase();
     const reader = new FileReader();
     reader.onload = e => {
       let data;
-      if (name.endsWith('.csv')) data = Papa.parse(e.target.result, {header:true, skipEmptyLines:true}).data;
-      else if (name.endsWith('.json')) data = JSON.parse(e.target.result);
-      else {
-        const wb = XLSX.read(e.target.result, {type:'binary'});
-        data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      }
-      lastRawRows = data; draw(data);
+      try {
+        if (name.endsWith('.csv')) data = Papa.parse(e.target.result, {header:true, skipEmptyLines:true}).data;
+        else if (name.endsWith('.json')) data = JSON.parse(e.target.result);
+        else {
+          const wb = XLSX.read(e.target.result, {type:'binary'});
+          data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        }
+        lastRawRows = data; draw(data);
+      } catch(err) { setMsg("檔案解析錯誤"); }
     };
     if (name.endsWith('.xlsx') || name.endsWith('.xls')) reader.readAsBinaryString(f);
     else reader.readAsText(f, "UTF-8");
   }
 
-  // 事件監聽
+  // 事件綁定
   document.getElementById('file').onchange = e => e.target.files[0] && loadFile(e.target.files[0]);
   document.getElementById('btnLoadDefault').onclick = () => {
     fetch('./data.csv', {cache:'no-store'}).then(r => r.text()).then(t => {
@@ -226,30 +232,51 @@
   };
   document.getElementById('mode').onchange = () => lastRawRows && draw(lastRawRows);
   document.getElementById('horizon').onchange = () => lastRawRows && draw(lastRawRows);
+  
   document.getElementById('btnShare').onclick = () => {
     if (!lastRawRows) return;
     const s = LZString.compressToEncodedURIComponent(JSON.stringify({r:lastRawRows, h:document.getElementById('horizon').value}));
     location.hash = "data=" + s;
     document.getElementById('btnCopy').disabled = false;
-    setMsg("網址已更新，可複製分享", true);
+    setMsg("網址已更新", true);
   };
+  
   document.getElementById('btnCopy').onclick = () => {
     navigator.clipboard.writeText(location.href);
-    setMsg("已複製到剪貼簿", true);
+    setMsg("連結已複製", true);
   };
 
-  // 初始化時間與 Hash
+  document.getElementById('btnLoadUrl').onclick = () => {
+    const url = document.getElementById('csvUrl').value.trim();
+    if(!url) return;
+    fetch(url).then(r => r.text()).then(t => {
+      lastRawRows = Papa.parse(t, {header:true, skipEmptyLines:true}).data;
+      draw(lastRawRows);
+    }).catch(e => setMsg("載入網址失敗"));
+  };
+
+  // 時鐘與更新時間
   setInterval(() => {
     document.getElementById('clockNow').textContent = new Date().toLocaleTimeString('zh-Hant-TW', {hour12:false});
   }, 1000);
 
+  async function showUpdatedAt() {
+    try {
+      const res = await fetch(`https://api.github.com/repos/twfcinv-svg/stock-heatmap1229/commits?path=data.csv&per_page=1`);
+      const arr = await res.json();
+      const d = new Date(arr[0].commit.committer.date);
+      document.getElementById('dataUpdated').textContent = `資料更新：${d.toLocaleString()}`;
+    } catch (e) { document.getElementById('dataUpdated').textContent = "更新時間：未知"; }
+  }
+
   window.onload = () => {
+    showUpdatedAt();
     if (location.hash.startsWith('#data=')) {
       try {
         const p = JSON.parse(LZString.decompressFromEncodedURIComponent(location.hash.slice(6)));
         lastRawRows = p.r; document.getElementById('horizon').value = p.h;
         draw(lastRawRows);
-      } catch(e) { setMsg("連結解析失敗"); }
+      } catch(e) { document.getElementById('btnLoadDefault').click(); }
     } else {
       document.getElementById('btnLoadDefault').click();
     }
