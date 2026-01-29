@@ -5,13 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>股票熱力圖（可上傳 / 可分享）</title>
 
-  <!-- Plotly Treemap -->
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-  <!-- CSV parser -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <!-- Excel parser -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <!-- URL-friendly compression -->
   <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
 
   <style>
@@ -239,80 +235,54 @@
     return map[h] || map['1d'];
   }
 
-function normalizeRows(rawRows, mode, horizon) {
-  if (!Array.isArray(rawRows) || rawRows.length === 0) throw new Error('沒有讀到任何資料列。');
+  function normalizeRows(rawRows, mode, horizon) {
+    if (!Array.isArray(rawRows) || rawRows.length === 0) throw new Error('沒有讀到任何資料列。');
 
-  const headers = Object.keys(rawRows[0] || {});
-  if (headers.length === 0) throw new Error('找不到欄位（header）。');
+    const headers = Object.keys(rawRows[0] || {});
+    if (headers.length === 0) throw new Error('找不到欄位（header）。');
 
-  const colGroup  = pickColumn(headers, ['group','sector','industry','分類','產業','類別','類股']);
-  const colSub    = pickColumn(headers, ['sub','subgroup','sub_group','subsector','sub_sector','子分類','子產業','次分類','次產業','細分','細項']);
-  const colSymbol = pickColumn(headers, ['symbol','name','名稱','股票']); // 顯示用
+    const colGroup  = pickColumn(headers, ['group','sector','industry','分類','產業','類別','類股']);
+    const colSub    = pickColumn(headers, ['sub','subgroup','sub_group','subsector','sub_sector','子分類','子產業','次分類','次產業','細分','細項']);
+    const colSymbol = pickColumn(headers, ['symbol','name','名稱','股票']); // 顯示用
 
-  // ★新增：專門拿來組網址的股票代碼欄位（優先 stock_code/股票代碼）
-  const colCode   = pickColumn(headers, ['stock_code','stockcode','stockCode','股票代碼','證券代碼','代碼','code','ticker']);
+    // ★新增：專門拿來組網址的股票代碼欄位（優先 stock_code/股票代碼）
+    const colCode   = pickColumn(headers, ['stock_code','stockcode','stockCode','股票代碼','證券代碼','代碼','code','ticker']);
 
-  // ★依期間挑「量」當面積（必要）
-  const colValue  = pickColumn(headers, valueCandidatesByHorizon(horizon));
-  if (!colValue) {
-    throw new Error(
-      `找不到「${horizonLabel(horizon)}」對應的量(面積)欄位。\n` +
-      `請提供其中一個欄位：\n${valueCandidatesByHorizon(horizon).join(' / ')}`
-    );
-  }
+    // ★依期間挑「量」當面積（必要）
+    const colValue  = pickColumn(headers, valueCandidatesByHorizon(horizon));
+    if (!colValue) {
+      throw new Error(
+        `找不到「${horizonLabel(horizon)}」對應的量(面積)欄位。\n` +
+        `請提供其中一個欄位：\n${valueCandidatesByHorizon(horizon).join(' / ')}`
+      );
+    }
 
-  // ★依期間挑「報酬」當顏色（必要）
-  const colChange = pickColumn(headers, changeCandidatesByHorizon(horizon));
-  if (!colChange) {
-    throw new Error(
-      `找不到「${horizonLabel(horizon)}」對應的變動(顏色)欄位。\n` +
-      `請提供其中一個欄位：\n${changeCandidatesByHorizon(horizon).join(' / ')}`
-    );
-  }
+    // ★依期間挑「報酬」當顏色（必要）
+    const colChange = pickColumn(headers, changeCandidatesByHorizon(horizon));
+    if (!colChange) {
+      throw new Error(
+        `找不到「${horizonLabel(horizon)}」對應的變動(顏色)欄位。\n` +
+        `請提供其中一個欄位：\n${changeCandidatesByHorizon(horizon).join(' / ')}`
+      );
+    }
 
-  if (!colSymbol) throw new Error('找不到「symbol」顯示欄位（可接受：symbol/name/名稱/股票）。');
-  if (!colCode) throw new Error('找不到「stock_code」股票代碼欄位（建議欄位名：stock_code 或 股票代碼）。');
+    if (!colSymbol) throw new Error('找不到「symbol」顯示欄位（可接受：symbol/name/名稱/股票）。');
+    if (!colCode) throw new Error('找不到「stock_code」股票代碼欄位（建議欄位名：stock_code 或 股票代碼）。');
 
-  // 先轉成基本結構（sub 後續依 mode 決定）
-  let rows = rawRows.map((r) => {
-    const group  = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
-    const symbol = String(r[colSymbol] ?? '').trim();
-    const code   = String(r[colCode] ?? '').trim(); // ★網址用代碼
-    const value  = toNumber(r[colValue]);
-    const change = toNumber(r[colChange]);
-
-    if (!symbol) return null;
-    if (!code) return null;
-
-    return {
-      group,
-      sub: '',
-      symbol,
-      code, // ★新增
-      value: Number.isFinite(value) && value > 0 ? value : 1,
-      change: Number.isFinite(change) ? change : 0
-    };
-  }).filter(Boolean);
-
-  if (rows.length === 0) throw new Error('資料列解析後為空（可能 symbol/stock_code 欄位有空值）。');
-
-  if (mode === 'subcol') {
-    if (!colSub) throw new Error('你選了「子分類欄位」模式，但資料找不到子分類欄位（sub/子分類/次分類…）。');
-
-    rows = rawRows.map((r) => {
+    // 先轉成基本結構（sub 後續依 mode 決定）
+    let rows = rawRows.map((r) => {
       const group  = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
       const symbol = String(r[colSymbol] ?? '').trim();
-      const code   = String(r[colCode] ?? '').trim();
+      const code   = String(r[colCode] ?? '').trim(); // ★網址用代碼
       const value  = toNumber(r[colValue]);
       const change = toNumber(r[colChange]);
-      const sub    = String(r[colSub] ?? '未分類').trim() || '未分類';
 
       if (!symbol) return null;
       if (!code) return null;
 
       return {
         group,
-        sub,
+        sub: '',
         symbol,
         code, // ★新增
         value: Number.isFinite(value) && value > 0 ? value : 1,
@@ -321,102 +291,187 @@ function normalizeRows(rawRows, mode, horizon) {
     }).filter(Boolean);
 
     if (rows.length === 0) throw new Error('資料列解析後為空（可能 symbol/stock_code 欄位有空值）。');
+
+    if (mode === 'subcol') {
+      if (!colSub) throw new Error('你選了「子分類欄位」模式，但資料找不到子分類欄位（sub/子分類/次分類…）。');
+
+      rows = rawRows.map((r) => {
+        const group  = colGroup ? String(r[colGroup] ?? '未分類').trim() : '未分類';
+        const symbol = String(r[colSymbol] ?? '').trim();
+        const code   = String(r[colCode] ?? '').trim();
+        const value  = toNumber(r[colValue]);
+        const change = toNumber(r[colChange]);
+        const sub    = String(r[colSub] ?? '未分類').trim() || '未分類';
+
+        if (!symbol) return null;
+        if (!code) return null;
+
+        return {
+          group,
+          sub,
+          symbol,
+          code, // ★新增
+          value: Number.isFinite(value) && value > 0 ? value : 1,
+          change: Number.isFinite(change) ? change : 0
+        };
+      }).filter(Boolean);
+
+      if (rows.length === 0) throw new Error('資料列解析後為空（可能 symbol/stock_code 欄位有空值）。');
+      return rows;
+    }
+
+    if (mode === 'amountbin') {
+      const byGroup = new Map();
+      for (const r of rows) {
+        if (!byGroup.has(r.group)) byGroup.set(r.group, []);
+        byGroup.get(r.group).push(r.value);
+      }
+      const qMap = new Map();
+      for (const [g, vs] of byGroup.entries()) qMap.set(g, quantiles(vs));
+      rows = rows.map(r => {
+        const {q1, q2} = qMap.get(r.group) || {q1:0,q2:0};
+        return {...r, sub: `成交額${amountBucket(r.value, q1, q2)}`};
+      });
+      return rows;
+    }
+
     return rows;
   }
 
-  if (mode === 'amountbin') {
-    const byGroup = new Map();
-    for (const r of rows) {
-      if (!byGroup.has(r.group)) byGroup.set(r.group, []);
-      byGroup.get(r.group).push(r.value);
-    }
-    const qMap = new Map();
-    for (const [g, vs] of byGroup.entries()) qMap.set(g, quantiles(vs));
-    rows = rows.map(r => {
-      const {q1, q2} = qMap.get(r.group) || {q1:0,q2:0};
-      return {...r, sub: `成交額${amountBucket(r.value, q1, q2)}`};
-    });
-    return rows;
-  }
+  // ===== 核心修改：buildTreemap (含 Top 10 Hover) =====
+  function buildTreemap(rows, mode) {
+    const ids = [], labels = [], parents = [], values = [], colors = [], customdata = [], hovertexts = [];
+    const ROOT_ID = 'root';
 
-  return rows;
-}
+    // 輔助函式：產生前 10 大排行 HTML
+    const getTop10Html = (stockList) => {
+      if (!stockList || stockList.length === 0) return '';
+      // 依 value (成交額) 由大到小排序
+      const sorted = stockList.slice().sort((a, b) => b.value - a.value);
+      const top10 = sorted.slice(0, 10);
+      
+      let html = '<br><br><b>🔥 成交額前 10 大：</b><br>';
+      top10.forEach((s, i) => {
+        // 顯示格式： 1. 2330 台積電 +1.5%
+        html += `${i + 1}. ${s.symbol} ${fmtPct(s.change)}<br>`;
+      });
+      return html;
+    };
 
-
- function buildTreemap(rows, mode) {
-  const ids = [], labels = [], parents = [], values = [], colors = [], customdata = [];
-  const ROOT_ID = 'root';
-
-  ids.push(ROOT_ID);
-  labels.push('全部');
-  parents.push('');
-  values.push(0);
-  colors.push(0);
-  customdata.push(null);
-
-  const groupAgg = new Map();
-  const subAgg = new Map();
-
-  for (const r of rows) {
-    if (!groupAgg.has(r.group)) groupAgg.set(r.group, {value:0, wchg:0});
-    const g = groupAgg.get(r.group);
-    g.value += r.value;
-    g.wchg += r.change * r.value;
-
-    if (mode !== 'none') {
-      const key = `${r.group}||${r.sub || '未分類'}`;
-      if (!subAgg.has(key)) subAgg.set(key, {value:0, wchg:0, group:r.group, sub:(r.sub || '未分類')});
-      const s = subAgg.get(key);
-      s.value += r.value;
-      s.wchg += r.change * r.value;
-    }
-  }
-
-  for (const [gname, g] of groupAgg.entries()) {
-    const gid = `g|${gname}`;
-    ids.push(gid);
-    labels.push(gname);
-    parents.push(ROOT_ID);
-    values.push(g.value);
-    colors.push(g.value ? (g.wchg / g.value) : 0);
+    // 1. 初始化 Root
+    ids.push(ROOT_ID);
+    labels.push('全部');
+    parents.push('');
+    values.push(0);
+    colors.push(0);
     customdata.push(null);
-  }
+    hovertexts.push('全部'); 
 
-  if (mode !== 'none') {
-    for (const s of subAgg.values()) {
-      const sid = `s|${s.group}|${s.sub}`;
-      ids.push(sid);
-      labels.push(s.sub);
-      parents.push(`g|${s.group}`);
-      values.push(s.value);
-      colors.push(s.value ? (s.wchg / s.value) : 0);
-      customdata.push(null);
+    const groupAgg = new Map();
+    const subAgg = new Map();
+    
+    // 用來收集該分類下的所有股票 (以便排序)
+    const groupStocks = new Map(); 
+    const subStocks = new Map();
+
+    // 2. 第一次迭代：聚合數據 (Aggregation)
+    for (const r of rows) {
+      // 處理第一層 (Group)
+      if (!groupAgg.has(r.group)) {
+        groupAgg.set(r.group, { value: 0, wchg: 0 });
+        groupStocks.set(r.group, []);
+      }
+      const g = groupAgg.get(r.group);
+      g.value += r.value;
+      g.wchg += r.change * r.value;
+      groupStocks.get(r.group).push(r);
+
+      // 處理第二層 (SubGroup)
+      if (mode !== 'none') {
+        const key = `${r.group}||${r.sub || '未分類'}`;
+        if (!subAgg.has(key)) {
+          subAgg.set(key, { value: 0, wchg: 0, group: r.group, sub: (r.sub || '未分類') });
+          subStocks.set(key, []);
+        }
+        const s = subAgg.get(key);
+        s.value += r.value;
+        s.wchg += r.change * r.value;
+        subStocks.get(key).push(r);
+      }
     }
+
+    // 3. 建立第一層節點 (Group)
+    for (const [gname, g] of groupAgg.entries()) {
+      const gid = `g|${gname}`;
+      ids.push(gid);
+      labels.push(gname);
+      parents.push(ROOT_ID);
+      values.push(g.value);
+      const avgChg = g.value ? (g.wchg / g.value) : 0;
+      colors.push(avgChg);
+      customdata.push(null);
+
+      // ★ 產生 Group 的 Hover (包含 Top 10)
+      const top10Str = getTop10Html(groupStocks.get(gname));
+      const txt = `<b>${gname}</b><br>` +
+                  `總量：${g.value.toLocaleString()}<br>` +
+                  `平均漲跌：${fmtPct(avgChg)}` + 
+                  top10Str;
+      hovertexts.push(txt);
+    }
+
+    // 4. 建立第二層節點 (SubGroup)
+    if (mode !== 'none') {
+      for (const [key, s] of subAgg.entries()) {
+        const sid = `s|${s.group}|${s.sub}`;
+        ids.push(sid);
+        labels.push(s.sub);
+        parents.push(`g|${s.group}`);
+        values.push(s.value);
+        const avgChg = s.value ? (s.wchg / s.value) : 0;
+        colors.push(avgChg);
+        customdata.push(null);
+
+        // ★ 產生 SubGroup 的 Hover (包含 Top 10)
+        const top10Str = getTop10Html(subStocks.get(key));
+        const txt = `<b>${s.sub}</b><br>` +
+                    `總量：${s.value.toLocaleString()}<br>` +
+                    `平均漲跌：${fmtPct(avgChg)}` + 
+                    top10Str;
+        hovertexts.push(txt);
+      }
+    }
+
+    // 5. 建立葉節點 (Stock)
+    for (const r of rows) {
+      const parentId = (mode === 'none')
+        ? `g|${r.group}`
+        : `s|${r.group}|${r.sub || '未分類'}`;
+
+      const lid = `l|${r.group}|${r.sub || ''}|${r.symbol}`;
+      ids.push(lid);
+      labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
+      parents.push(parentId);
+      values.push(r.value);
+      colors.push(r.change);
+      customdata.push(r.code || '');
+
+      // ★ 產生個股的 Hover (維持詳細資訊)
+      const txt = `<b>${r.symbol}</b><br>` +
+                  `代碼：${r.code}<br>` +
+                  `量：${r.value.toLocaleString()}<br>` +
+                  `變動：${fmtPct(r.change)}`;
+      hovertexts.push(txt);
+    }
+
+    // 修正 Root 值
+    values[0] = Array.from(groupAgg.values()).reduce((s, x) => s + x.value, 0);
+    hovertexts[0] = `<b>全部</b><br>總量：${values[0].toLocaleString()}`;
+
+    return { ids, labels, parents, values, colors, customdata, hovertexts };
   }
 
-  for (const r of rows) {
-    const parentId = (mode === 'none')
-      ? `g|${r.group}`
-      : `s|${r.group}|${r.sub || '未分類'}`;
-
-    const lid = `l|${r.group}|${r.sub || ''}|${r.symbol}`;
-    ids.push(lid);
-
-    // 葉節點 label = symbol + 換行 + 漲跌幅（1位小數）
-    labels.push(`${r.symbol}<br>${fmtPct(r.change)}`);
-
-    parents.push(parentId);
-    values.push(r.value);
-    colors.push(r.change);
-
-    // ★把股票代碼塞進 customdata（之後點擊會用到）
-    customdata.push(r.code || '');
-  }
-
-  values[0] = Array.from(groupAgg.values()).reduce((s,x)=>s+x.value,0);
-  return {ids, labels, parents, values, colors, customdata};
-}
-
+  // ===== 核心修改：render (綁定 hovertext) =====
   function render(rawRows) {
     const mode = $mode.value;
     const horizon = $horizon.value;
@@ -427,68 +482,65 @@ function normalizeRows(rawRows, mode, horizon) {
     const rows = normalizeRows(rawRows, mode, horizon);
     lastRows = rows;
 
-    const {ids, labels, parents, values, colors, customdata} = buildTreemap(rows, mode);
+    // 解構取得新的 hovertexts
+    const { ids, labels, parents, values, colors, customdata, hovertexts } = buildTreemap(rows, mode);
 
-const data = [{
-  type: 'treemap',
-  ids,
-  labels,
-  parents,
-  values,
-  customdata, // ★加這行
-  branchvalues: 'total',
-  textinfo: 'label',
-  marker: {
-    colors,
-    colorscale: [
-      [0,'#1a9641'],
-      [0.5,'#f3f4f6'],
-      [1,'#d7191c']
-    ],
-    cmid: 0,
-    line: { width: 1, color: '#d1d5db' }
-  },
-  hovertemplate:
-    `<b>%{label}</b><br>` +
-    `上層：%{parent}<br>` +
-    `量（${horizonLabel(horizon)}）：%{value}<br>` +
-    `變動（${horizonLabel(horizon)}）：%{color:.2f}<extra></extra>`
-}];
+    const data = [{
+      type: 'treemap',
+      ids,
+      labels,
+      parents,
+      values,
+      customdata,
+      hovertext: hovertexts, // ★ 綁定動態生成的 hover 文字
+      branchvalues: 'total',
+      textinfo: 'label',
+      marker: {
+        colors,
+        colorscale: [
+          [0, '#1a9641'],
+          [0.5, '#f3f4f6'],
+          [1, '#d7191c']
+        ],
+        cmid: 0,
+        line: { width: 1, color: '#d1d5db' }
+      },
+      // ★ 改用 %{hovertext} 讀取我們自訂的 HTML
+      hovertemplate: '%{hovertext}<extra></extra>' 
+    }];
 
-Plotly.newPlot('chart', data, {margin:{l:10,r:10,t:30,b:10}}, {responsive:true, displaylogo:false})
-  .then(() => {
-    const chartDiv = document.getElementById('chart');
-    if (!chartDiv) return;
+    Plotly.newPlot('chart', data, { margin: { l: 10, r: 10, t: 30, b: 10 } }, { responsive: true, displaylogo: false })
+      .then(() => {
+        const chartDiv = document.getElementById('chart');
+        if (!chartDiv) return;
 
-    // 避免重複綁定（每次 render 都會 newPlot）
-    if (typeof chartDiv.removeAllListeners === 'function') {
-      chartDiv.removeAllListeners('plotly_treemapclick');
-    }
+        if (typeof chartDiv.removeAllListeners === 'function') {
+          chartDiv.removeAllListeners('plotly_treemapclick');
+        }
 
-    chartDiv.on('plotly_treemapclick', (e) => {
-      const pt = e?.points?.[0];
-      const id = String(pt?.id || '');
+        chartDiv.on('plotly_treemapclick', (e) => {
+          const pt = e?.points?.[0];
+          const id = String(pt?.id || '');
 
-      // ★只有葉節點（股票）才處理；阻止 zoom
-      if (!id.startsWith('l|')) return;
+          if (!id.startsWith('l|')) return; // 只處理葉節點點擊
 
-      const code = String(pt?.customdata || '').trim();
-      if (!code) {
-        setMsg('找不到股票代碼（請確認 CSV 有 stock_code 欄位且不為空）。', false);
-        return false;
-      }
+          const code = String(pt?.customdata || '').trim();
+          if (!code) {
+            setMsg('找不到股票代碼（請確認 CSV 有 stock_code 欄位且不為空）。', false);
+            return false;
+          }
 
-      const url = `https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${encodeURIComponent(code)}`;
-      window.location.href = url;
+          const url = `https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${encodeURIComponent(code)}`;
+          window.location.href = url;
 
-      return false; // ★阻止 Plotly 預設 zoom（避免點到底層變空白）
-    });
-  });
+          return false;
+        });
+      });
 
-setMsg(`已更新熱力圖（期間：${horizonLabel(horizon)}；模式：${mode}）。`, true);
-$btnCopy.disabled = true;
+    setMsg(`已更新熱力圖（期間：${horizonLabel(horizon)}；模式：${mode}）。`, true);
+    $btnCopy.disabled = true;
 
-showDataUpdatedAt();
+    showDataUpdatedAt();
   }
 
   function loadCSVText(text) {
@@ -662,6 +714,3 @@ showDataUpdatedAt();
 </script>
 </body>
 </html>
-
-
-
