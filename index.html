@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>股票熱力圖 - 穩定修復版</title>
+  <title>股票熱力圖 (結構修復版)</title>
 
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -32,7 +32,7 @@
 
 <body>
   <header>
-    <h1>股票熱力圖 (Stock Heatmap)</h1>
+    <h1>股票熱力圖 (結構修復版)</h1>
     <div class="muted">
       滑鼠移至類股可預覽 Top 10 成分股。點擊股票可查看 K 線圖。
       <div class="timebar">
@@ -84,12 +84,13 @@
   
   const fmtP = v => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
 
-  // 生成成分股清單文字
+  // 生成成分股清單文字 (給 Hover 用)
   function getTop10Text(mems) {
     const top = [...mems].sort((a,b) => b.value - a.value).slice(0, 10);
-    return "<b>成交金額前 10 名：</b><br>" + top.map((s,i) => `${i+1}. ${s.symbol} (${fmtP(s.change)})`).join('<br>');
+    return "<b>成交金額 Top 10：</b><br>" + top.map((s,i) => `${i+1}. ${s.symbol} (${fmtP(s.change)})`).join('<br>');
   }
 
+  // 資料標準化
   function normalize(raw, mode, horizon) {
     if (!raw || !raw.length) throw new Error("無效資料");
     const h = Object.keys(raw[0]);
@@ -132,50 +133,73 @@
       
       const ids=[], labels=[], parents=[], values=[], colors=[], customs=[];
       
-      // Root 節點
-      ids.push('root'); labels.push('全部'); parents.push(''); values.push(0); colors.push(0); customs.push('市場總覽');
+      // 1. Root 節點
+      ids.push('root'); labels.push('市場總覽'); parents.push(''); values.push(0); colors.push(0); customs.push('市場總覽');
 
-      const groups = {};
+      // 2. 彙整資料 (使用 Map 確保分類正確)
+      const groupMap = new Map();
+      const subMap = new Map();
+
       rows.forEach(r => {
-        if (!groups[r.group]) groups[r.group] = { mems:[], subs:{} };
-        groups[r.group].mems.push(r);
+        // 彙整類股
+        if (!groupMap.has(r.group)) groupMap.set(r.group, []);
+        groupMap.get(r.group).push(r);
+
+        // 彙整子分類 (如果模式需要)
         if (mode === 'subcol') {
-          if (!groups[r.group].subs[r.sub]) groups[r.group].subs[r.sub] = [];
-          groups[r.group].subs[r.sub].push(r);
+          const key = `${r.group}||${r.sub}`;
+          if (!subMap.has(key)) subMap.set(key, { g: r.group, s: r.sub, mems: [] });
+          subMap.get(key).mems.push(r);
         }
       });
 
-      // 類股層級處理
-      Object.entries(groups).forEach(([gName, gData]) => {
+      // 3. 建立類股節點
+      for (const [gName, mems] of groupMap.entries()) {
         const gId = `g|${gName}`;
-        const gVal = gData.mems.reduce((s,x)=>s+x.value, 0);
-        const gAvg = gData.mems.reduce((s,x)=>s+(x.change*x.value),0) / gVal;
+        const gVal = mems.reduce((s,x)=>s+x.value, 0);
+        const gAvg = mems.reduce((s,x)=>s+(x.change*x.value),0) / gVal;
         
-        ids.push(gId); labels.push(gName); parents.push('root');
-        values.push(gVal); colors.push(gAvg); 
-        customs.push(`<b>${gName}</b><br>${getTop10Text(gData.mems)}`);
+        ids.push(gId); 
+        labels.push(gName); 
+        parents.push('root');
+        values.push(gVal); 
+        colors.push(gAvg); 
+        // 這裡存入 Top 10 列表，解決亂碼問題
+        customs.push(`<b>${gName}</b><br>${getTop10Text(mems)}`);
+      }
 
-        if (mode === 'subcol') {
-          Object.entries(gData.subs).forEach(([sName, sMems]) => {
-            const sId = `s|${gName}|${sName}`;
-            const sVal = sMems.reduce((s,x)=>s+x.value, 0);
-            const sAvg = sMems.reduce((s,x)=>s+(x.change*x.value),0) / sVal;
-            ids.push(sId); labels.push(sName); parents.push(gId);
-            values.push(sVal); colors.push(sAvg);
-            customs.push(`<b>${sName}</b><br>${getTop10Text(sMems)}`);
-          });
+      // 4. 建立子分類節點
+      if (mode === 'subcol') {
+        for (const [key, data] of subMap.entries()) {
+          const sId = `s|${data.g}|${data.s}`;
+          const pId = `g|${data.g}`;
+          const sVal = data.mems.reduce((s,x)=>s+x.value, 0);
+          const sAvg = data.mems.reduce((s,x)=>s+(x.change*x.value),0) / sVal;
+
+          ids.push(sId);
+          labels.push(data.s);
+          parents.push(pId);
+          values.push(sVal);
+          colors.push(sAvg);
+          customs.push(`<b>${data.s}</b><br>${getTop10Text(data.mems)}`);
         }
-      });
+      }
 
-      // 股票層級處理
+      // 5. 建立股票節點
       rows.forEach(r => {
+        // 根據模式決定父節點是誰
         const pId = mode === 'subcol' ? `s|${r.group}|${r.sub}` : `g|${r.group}`;
-        ids.push(`l|${r.code}`); 
+        // 使用代碼當作唯一 ID 的一部分，方便點擊時抓取代碼
+        ids.push(`l|${r.code}|${r.symbol}`); 
         labels.push(`${r.symbol}<br>${fmtP(r.change)}`);
-        parents.push(pId); values.push(r.value); colors.push(r.change);
-        customs.push(`<b>${r.symbol} (${r.code})</b><br>漲跌幅: ${fmtP(r.change)}`);
+        parents.push(pId); 
+        values.push(r.value); 
+        colors.push(r.change);
+        // 股票的 Hover 顯示單純的資訊
+        customs.push(`<b>${r.symbol} (${r.code})</b><br>成交額: ${Math.round(r.value).toLocaleString()}<br>漲跌幅: ${fmtP(r.change)}`);
       });
 
+      // 修正 Root 數值
       values[0] = rows.reduce((s,x)=>s+x.value, 0);
 
       const data = [{
@@ -184,25 +208,31 @@
         customdata: customs,
         branchvalues: 'total',
         marker: { colors, colorscale: [[0,'#1a9641'],[0.5,'#f3f4f6'],[1,'#d7191c']], cmid:0 },
-        // 關鍵修復：這裡直接讀取預先處理好的 customdata，不再放複雜邏輯
+        // 乾淨的 HoverTemplate，不會有程式碼跑出來
         hovertemplate: "%{customdata}<extra></extra>"
       }];
 
       Plotly.newPlot($chart, data, {margin:{l:5,r:5,t:25,b:5}}, {responsive:true, displaylogo:false});
       
+      // 點擊事件
       $chart.on('plotly_treemapclick', e => {
-        const id = e.points[0].id;
+        const pt = e.points[0];
+        const id = pt.id;
+        // 判斷是否為股票節點 (l|代碼|名稱)
         if (id && id.startsWith('l|')) {
-          const code = id.split('|')[1];
-          window.open(`https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${code}`, '_blank');
+          const parts = id.split('|');
+          const code = parts[1]; // 從 ID 中取出代碼
+          if(code) {
+             window.open(`https://www.fbs.com.tw/MKT/Index?name=%EF%BC%AB%E7%B7%9A%E5%9C%96&stock=${code}`, '_blank');
+          }
         }
         return false;
       });
       setMsg("更新完成", true);
-    } catch (e) { setMsg(e.message); }
+    } catch (e) { console.error(e); setMsg(e.message); }
   }
 
-  // 檔案與 API 載入
+  // 檔案與 API 載入 (保持不變)
   async function loadFile(f) {
     const name = f.name.toLowerCase();
     const reader = new FileReader();
