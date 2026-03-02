@@ -38,20 +38,39 @@
     .pill { font-size:12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); }
     .timebar { margin-top: 8px; display:flex; gap:8px; flex-wrap: wrap; align-items:center; }
 
-    /* --- 新增：樹狀目錄樣式 --- */
+    /* --- 新增：樹狀目錄樣式 (並排網格版) --- */
     #treeView { padding: 20px 16px; border-top: 1px solid var(--border); background: #fdfdfd; margin-top: 10px; }
-    #treeView h2 { margin-top: 0; font-size: 16px; margin-bottom: 12px; color: #111827; }
-    details { margin-left: 16px; margin-bottom: 4px; }
-    summary { cursor: pointer; padding: 4px 4px; font-weight: 600; font-size: 14px; border-radius: 6px; user-select: none; }
+    #treeView h2 { margin-top: 0; font-size: 16px; margin-bottom: 16px; color: #111827; }
+    
+    /* 自動適應寬度的並排網格 */
+    .tree-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+      align-items: start; 
+    }
+
+    /* 外層分類卡片風格 */
+    #treeView > .tree-grid > details { 
+      background: #fff; 
+      border: 1px solid var(--border); 
+      border-radius: 8px; 
+      padding: 8px 12px; 
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      margin: 0;
+    }
+    
+    summary { cursor: pointer; padding: 6px 4px; font-weight: 600; font-size: 14px; border-radius: 6px; user-select: none; }
     summary:hover { background: #f3f4f6; }
-    details > details { margin-top: 4px; }
-    details > details > summary { font-weight: normal; color: #4b5563; font-size: 13px; }
-    .tree-stock { margin-left: 24px; font-size: 13px; color: #374151; padding: 4px 4px; display: flex; gap: 16px; border-bottom: 1px dashed #e5e7eb; max-width: 300px;}
+    details > details { margin-top: 4px; margin-left: 8px; }
+    details > details > summary { font-weight: normal; color: #4b5563; font-size: 13px; padding: 4px; }
+    
+    .tree-stock { margin-left: 20px; font-size: 13px; color: #374151; padding: 6px 4px; display: flex; gap: 16px; border-bottom: 1px dashed #e5e7eb; }
     .tree-stock:hover { background: #f9fafb; }
     .tree-stock a { text-decoration: none; color: inherit; flex-grow: 1; }
     .tree-stock a:hover { color: #2563eb; text-decoration: underline; }
-    .val-pos { color: #d7191c; font-weight: bold; } /* 漲（紅） */
-    .val-neg { color: #1a9641; font-weight: bold; } /* 跌（綠） */
+    .val-pos { color: #d7191c; font-weight: bold; }
+    .val-neg { color: #1a9641; font-weight: bold; }
     .val-zero { color: #9ca3af; }
   </style>
 </head>
@@ -463,7 +482,7 @@
     return { ids, labels, parents, values, colors, customdata, hovertexts };
   }
 
-  // ===== 新增：產生可折疊樹狀目錄 =====
+  // ===== 產生可折疊樹狀目錄 (並排版) =====
   function renderHtmlTree(rows, mode) {
     const container = document.getElementById('treeView');
     if (!container) return;
@@ -473,7 +492,6 @@
       return;
     }
 
-    // 1. 整理資料層級 (Group -> Sub -> Stocks)
     const treeData = {};
     for (const r of rows) {
       const g = r.group;
@@ -483,10 +501,11 @@
       treeData[g][s].push(r);
     }
 
-    // 2. 產生 HTML 字串
     let html = '<h2>🗂️ 產業樹狀目錄清單</h2>';
     
-    // 排序 Group
+    // ★ 包裝一層 grid 容器來做並排
+    html += '<div class="tree-grid">'; 
+    
     const groups = Object.keys(treeData).sort(); 
 
     for (const gName of groups) {
@@ -496,7 +515,6 @@
       const subKeys = Object.keys(subs).sort();
 
       for (const sName of subKeys) {
-        // 股票依成交額 (value) 大到小排序
         const stocks = subs[sName].sort((a, b) => b.value - a.value);
         
         const stockHtml = stocks.map(st => {
@@ -520,6 +538,9 @@
       }
       html += `</details>`;
     }
+
+    // ★ 把 grid 容器關閉
+    html += '</div>';
 
     container.innerHTML = html;
   }
@@ -587,7 +608,7 @@
         });
       });
 
-    // ★ 同步更新下方的樹狀目錄
+    // ★ 同步更新下方的並排樹狀目錄
     renderHtmlTree(rows, mode);
 
     setMsg(`已更新熱力圖（期間：${horizonLabel(horizon)}；模式：${mode}）。`, true);
