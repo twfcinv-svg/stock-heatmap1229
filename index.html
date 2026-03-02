@@ -482,7 +482,7 @@
     return { ids, labels, parents, values, colors, customdata, hovertexts };
   }
 
-  // ===== 產生可折疊樹狀目錄 (並排版) =====
+  // ===== 產生可折疊樹狀目錄 (並排版 + 依成交額排序) =====
   function renderHtmlTree(rows, mode) {
     const container = document.getElementById('treeView');
     if (!container) return;
@@ -493,28 +493,43 @@
     }
 
     const treeData = {};
+    const groupTotals = {}; 
+
+    // 1. 整理資料層級 (Group -> Sub -> Stocks)
     for (const r of rows) {
       const g = r.group;
       const s = (mode !== 'none' && r.sub) ? r.sub : '未分類';
-      if (!treeData[g]) treeData[g] = {};
+      
+      if (!treeData[g]) {
+        treeData[g] = {};
+        groupTotals[g] = 0; 
+      }
       if (!treeData[g][s]) treeData[g][s] = [];
+      
       treeData[g][s].push(r);
+      groupTotals[g] += r.value; 
     }
 
     let html = '<h2>🗂️ 產業樹狀目錄清單</h2>';
-    
-    // ★ 包裝一層 grid 容器來做並排
     html += '<div class="tree-grid">'; 
     
-    const groups = Object.keys(treeData).sort(); 
+    // 排序 Group：依據 groupTotals 的金額由大到小排序
+    const groups = Object.keys(treeData).sort((a, b) => groupTotals[b] - groupTotals[a]); 
 
     for (const gName of groups) {
       html += `<details><summary>📁 ${gName}</summary>`;
       
       const subs = treeData[gName];
-      const subKeys = Object.keys(subs).sort();
+      
+      // 排序 Sub-group (子產業)：計算該子分類下所有股票金額加總，再由大到小排序
+      const subKeys = Object.keys(subs).sort((a, b) => {
+        const sumA = subs[a].reduce((acc, st) => acc + st.value, 0);
+        const sumB = subs[b].reduce((acc, st) => acc + st.value, 0);
+        return sumB - sumA;
+      });
 
       for (const sName of subKeys) {
+        // 股票依成交額大到小排序
         const stocks = subs[sName].sort((a, b) => b.value - a.value);
         
         const stockHtml = stocks.map(st => {
@@ -539,7 +554,6 @@
       html += `</details>`;
     }
 
-    // ★ 把 grid 容器關閉
     html += '</div>';
 
     container.innerHTML = html;
